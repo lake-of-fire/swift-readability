@@ -42,7 +42,7 @@ final class Postprocessor {
                     // Copy attributes from parent to child.
                     if let attrs = current.getAttributes() {
                         for attr in attrs {
-                            try? child.attr(attr.getKey(), attr.getValue())
+                            try? child.attr(attr.getKeyUTF8(), attr.getValueUTF8())
                         }
                     }
 
@@ -188,13 +188,13 @@ final class Postprocessor {
             // percent-escaped prefix followed by a scheme-like substring). Fall back to manual RFC3986-ish resolution.
             let baseDir = baseURL.deletingLastPathComponent().absoluteString
             if encoded.hasPrefix("//"), let scheme = baseURL.scheme {
-                let candidate = "\(scheme.lowercased()):\(encoded)"
+                let candidate = scheme.lowercased() + ":" + encoded
                 return URL(string: candidate).map(normalizedAbsoluteString(_:)) ?? candidate
             }
             if encoded.hasPrefix("/") {
                 if let scheme = baseURL.scheme, let host = baseURL.host {
-                    let portPart = baseURL.port.map { ":\($0)" } ?? ""
-                    return "\(scheme.lowercased())://\(host.lowercased())\(portPart)\(encoded)"
+                    let portPart = baseURL.port.map { ":" + String($0) } ?? ""
+                    return scheme.lowercased() + "://" + host.lowercased() + portPart + encoded
                 }
                 return baseDir + encoded.dropFirst()
             }
@@ -213,14 +213,15 @@ final class Postprocessor {
         // Avoid SwiftSoup tag-query caching; we mutate the DOM in this phase.
         if let links = try? element.select("a") {
             for link in links {
-                let href = link.attrOrEmpty("href")
+                let href = String(decoding: link.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href), as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if href.isEmpty { continue }
 
                 if href.hasPrefix("javascript:") {
                     replaceJavascriptLink(link)
                 } else {
-                    try? link.attr("href", toAbsoluteURI(href))
+                    let resolved = toAbsoluteURI(href)
+                    try? link.attr(ReadabilityUTF8Arrays.href, resolved.utf8Array)
                 }
             }
         }
@@ -228,19 +229,21 @@ final class Postprocessor {
         // media tags: src/poster/srcset
         if let medias = try? element.select("img, picture, figure, video, audio, source") {
             for media in medias {
-                let src = media.attrOrEmpty("src")
+                let src = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.src), as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !src.isEmpty {
-                    try? media.attr("src", toAbsoluteURI(src))
+                    let resolved = toAbsoluteURI(src)
+                    try? media.attr(ReadabilityUTF8Arrays.src, resolved.utf8Array)
                 }
 
-                let poster = media.attrOrEmpty("poster")
+                let poster = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.poster), as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !poster.isEmpty {
-                    try? media.attr("poster", toAbsoluteURI(poster))
+                    let resolved = toAbsoluteURI(poster)
+                    try? media.attr(ReadabilityUTF8Arrays.poster, resolved.utf8Array)
                 }
 
-                let srcset = media.attrOrEmpty("srcset")
+                let srcset = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.srcset), as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !srcset.isEmpty {
                     let newSrcset = replaceMatches(srcsetUrlPattern, in: srcset) { match, nsString in
@@ -250,7 +253,7 @@ final class Postprocessor {
                         let descriptor = descriptorRange.location != NSNotFound ? nsString.substring(with: descriptorRange) : ""
                         return toAbsoluteURI(urlPart) + descriptor + commaPart
                     }
-                    try? media.attr("srcset", newSrcset)
+                    try? media.attr(ReadabilityUTF8Arrays.srcset, newSrcset.utf8Array)
                 }
             }
         }
@@ -258,11 +261,11 @@ final class Postprocessor {
 
     private func computeBaseURI(originalDocument: Document, documentURI: String) -> String {
         guard let documentURL = URL(string: documentURI) else { return documentURI }
-        guard let baseElement = try? originalDocument.select("base[href]").first(),
-              let baseHref = try? baseElement.attr("href")
-        else {
+        guard let baseElement = try? originalDocument.select("base[href]").first() else {
             return documentURI
         }
+        let baseHref = String(decoding: baseElement.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href), as: UTF8.self)
+        if baseHref.isEmpty { return documentURI }
 
         let trimmed = baseHref.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return documentURI }
@@ -316,7 +319,7 @@ final class Postprocessor {
     }
 
     private func cleanClasses(node: Element, classesToPreserve: Set<String>) {
-        let classAttr = node.attrOrEmpty("class")
+        let classAttr = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.class_), as: UTF8.self)
         var seen: Set<String> = []
         let keptClassNames = classAttr
             .split(whereSeparator: { $0.isWhitespace })
@@ -324,9 +327,9 @@ final class Postprocessor {
             .filter { classesToPreserve.contains($0) && seen.insert($0).inserted }
 
         if keptClassNames.isEmpty {
-            try? node.removeAttr("class")
+            try? node.removeAttr(ReadabilityUTF8Arrays.class_)
         } else {
-            try? node.attr("class", keptClassNames.joined(separator: " "))
+            try? node.attr(ReadabilityUTF8Arrays.class_, keptClassNames.joined(separator: " ").utf8Array)
         }
         for child in node.children() {
             cleanClasses(node: child, classesToPreserve: classesToPreserve)

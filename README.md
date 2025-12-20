@@ -74,6 +74,7 @@ let readerable = Readability.isProbablyReaderable(html: htmlString)
 
 The test suite ports Mozilla's `test-readability.js` and `test-isProbablyReaderable.js`,
 including the full fixture corpus under `Tests/SwiftReadabilityTests/Fixtures`.
+Ported against `@mozilla/readability` **v0.6.0** (Readability.js) to keep behavior and fixtures aligned.
 
 Run all tests:
 
@@ -85,4 +86,12 @@ Filter fixtures:
 
 ```
 SWIFT_READABILITY_FIXTURES=nytimes-3 swift test -q -Xswiftc -suppress-warnings
+```
+
+## Benchmark
+
+Run the local benchmark harness (fixtures-based):
+
+```
+swift run SwiftReadabilityBench --iterations 5 --warmup 1
 ```

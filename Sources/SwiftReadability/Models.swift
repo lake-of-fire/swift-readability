@@ -97,10 +97,10 @@ public final class Article {
         return """
         <html>
           <head>
-            <meta charset="\(encoding)"/>
+            <meta charset=\"" + encoding + "\"/>
           </head>
           <body>
-            \(content)
+            " + content + "
           </body>
         </html>
         """

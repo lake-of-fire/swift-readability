@@ -69,3 +69,7 @@ fastlane/test_output
 .DS_Store
 DerivedData/
 .netrc
+
+# Local porting artifacts
+tmp-*/
+tmp-*

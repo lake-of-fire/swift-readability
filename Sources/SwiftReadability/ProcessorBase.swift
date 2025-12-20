@@ -11,7 +11,7 @@ class ProcessorBase {
         for child in elements.reversed() where child !== element {
             if child.parent() != nil {
                 if filter?(child) ?? true {
-                    printAndRemove(node: child, reason: "removeNode('\(tagName)')")
+                    printAndRemove(node: child, reason: "removeNode('" + tagName + "')")
                 }
             }
         }

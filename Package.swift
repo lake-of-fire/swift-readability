@@ -17,9 +17,13 @@ let package = Package(
             name: "SwiftReadability",
             targets: ["SwiftReadability"]
         ),
+        .executable(
+            name: "SwiftReadabilityBench",
+            targets: ["SwiftReadabilityBench"]
+        ),
     ],
     dependencies: [
-        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.5"),
+        .package(url: "https://github.com/lake-of-fire/SwiftSoup.git", revision: "ebaa23fb071f5818706b5c4048a41e535e1de5f2"),
         // Pin to a Swift 6.2-compatible revision (SwiftSyntax 603.x).
         .package(url: "https://github.com/apple/swift-testing.git", revision: "1d3961a0b006c25bec5301a01f4ba4fbfa7253c6")
     ],
@@ -30,6 +34,12 @@ let package = Package(
             name: "SwiftReadability",
             dependencies: [
                 .product(name: "SwiftSoup", package: "SwiftSoup")
+            ]
+        ),
+        .executableTarget(
+            name: "SwiftReadabilityBench",
+            dependencies: [
+                "SwiftReadability"
             ]
         ),
         .testTarget(

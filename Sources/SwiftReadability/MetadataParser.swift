@@ -121,11 +121,11 @@ final class MetadataParser: ProcessorBase {
 
         guard let metas = try? document.select("meta") else { return values }
         for element in metas {
-            let content = element.attrOrEmpty("content")
+            let content = String(decoding: element.attrOrEmptyUTF8(ReadabilityUTF8Arrays.content), as: UTF8.self)
             if content.isEmpty { continue }
 
-            let elementName = element.attrOrEmpty("name")
-            let elementProperty = element.attrOrEmpty("property")
+            let elementName = String(decoding: element.attrOrEmptyUTF8(ReadabilityUTF8Arrays.name), as: UTF8.self)
+            let elementProperty = String(decoding: element.attrOrEmptyUTF8(ReadabilityUTF8Arrays.property), as: UTF8.self)
 
             var matchedProperty = false
 
@@ -436,7 +436,8 @@ final class MetadataParser: ProcessorBase {
         let separators: [Character] = ["|", "-", "–", "—", "\\", "/", ">", "»"]
         func containsSpacedSeparator(_ text: String) -> Bool {
             for sep in separators {
-                if text.range(of: "\\s\\\(sep)\\s", options: .regularExpression) != nil {
+                let pattern = "\\s\\" + String(sep) + "\\s"
+                if text.range(of: pattern, options: .regularExpression) != nil {
                     return true
                 }
             }

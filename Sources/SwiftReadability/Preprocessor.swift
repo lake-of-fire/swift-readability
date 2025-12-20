@@ -47,12 +47,16 @@ final class Preprocessor: ProcessorBase {
                 var keep = false
                 if let attrs = img.getAttributes() {
                     for attr in attrs {
-                        let name = attr.getKey().lowercased()
-                        let value = attr.getValue()
-                        if ["src", "srcset", "data-src", "data-srcset"].contains(name) {
+                        let nameBytes = attr.getKeyUTF8()
+                        let valueBytes = attr.getValueUTF8()
+                        if nameBytes.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.src) ||
+                            nameBytes.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.srcset) ||
+                            nameBytes.equalsIgnoreCaseASCII("data-src".utf8Array) ||
+                            nameBytes.equalsIgnoreCaseASCII("data-srcset".utf8Array) {
                             keep = true
                             break
                         }
+                        let value = String(decoding: valueBytes, as: UTF8.self)
                         if value.range(of: "\\.(jpg|jpeg|png|webp)", options: [.regularExpression, .caseInsensitive]) != nil {
                             keep = true
                             break
@@ -90,21 +94,25 @@ final class Preprocessor: ProcessorBase {
 
             if let attrs = prevImg.getAttributes() {
                 for attr in attrs {
-                    let name = attr.getKey()
-                    let value = attr.getValue()
-                    if value.isEmpty { continue }
+                    let nameBytes = attr.getKeyUTF8()
+                    let valueBytes = attr.getValueUTF8()
+                    if valueBytes.isEmpty { continue }
 
-                    let isSrcAttr = name == "src" || name == "srcset"
+                    let isSrcAttr = nameBytes.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.src) ||
+                        nameBytes.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.srcset)
+                    let value = String(decoding: valueBytes, as: UTF8.self)
                     let looksLikeImageURL = value.range(of: "\\.(jpg|jpeg|png|webp)", options: [.regularExpression, .caseInsensitive]) != nil
                     if !(isSrcAttr || looksLikeImageURL) { continue }
 
-                    if newImg.attrOrEmpty(name) == value { continue }
+                    if newImg.attrOrEmptyUTF8(nameBytes) == valueBytes { continue }
 
-                    var attrName = name
-                    if newImg.hasAttr(name) {
-                        attrName = "data-old-\(name)"
+                    if newImg.hasAttr(nameBytes) {
+                        let nameString = String(decoding: nameBytes, as: UTF8.self)
+                        let attrName = "data-old-" + nameString
+                        try? newImg.attr(attrName, value)
+                    } else {
+                        try? newImg.attr(nameBytes, valueBytes)
                     }
-                    try? newImg.attr(attrName, value)
                 }
             }
 
@@ -180,7 +188,7 @@ final class Preprocessor: ProcessorBase {
             ReadabilityUTF8Arrays.sup,
             ReadabilityUTF8Arrays.textarea,
             ReadabilityUTF8Arrays.time,
-            ReadabilityUTF8Arrays.var,
+            ReadabilityUTF8Arrays.var_,
             ReadabilityUTF8Arrays.wbr
         ]
 

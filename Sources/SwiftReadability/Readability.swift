@@ -195,10 +195,12 @@ public final class Readability {
         }
 
         func defaultVisibilityChecker(_ node: Element) -> Bool {
-            let style = node.attrOrEmpty("style")
+            let styleBytes = node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.style)
+            let style = String(decoding: styleBytes, as: UTF8.self)
             if matches(displayNone, style) { return false }
-            if node.hasAttr("hidden") { return false }
-            if node.hasAttr("aria-hidden"), node.attrOrEmpty("aria-hidden") == "true" {
+            if node.hasAttr(ReadabilityUTF8Arrays.hidden) { return false }
+            if node.hasAttr(ReadabilityUTF8Arrays.ariaHidden),
+               node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.ariaHidden) == ReadabilityUTF8Arrays.true_ {
                 let className = node.classNameSafe()
                 if !className.contains("fallback-image") { return false }
             }
@@ -208,7 +210,7 @@ public final class Readability {
         func isDescendantOfListItem(_ node: Element) -> Bool {
             var parent = node.parent()
             while let p = parent {
-                if p.tagNameSafe() == "li" { return true }
+                if p.tagNameUTF8() == ReadabilityUTF8Arrays.li { return true }
                 parent = p.parent()
             }
             return false
@@ -225,7 +227,7 @@ public final class Readability {
                 continue
             }
 
-            if node.tagNameSafe() == "p", isDescendantOfListItem(node) {
+            if node.tagNameUTF8() == ReadabilityUTF8Arrays.p, isDescendantOfListItem(node) {
                 continue
             }
 
@@ -267,7 +269,8 @@ private extension Readability {
         if options.maxElemsToParse > 0 {
             let numTags = (try? document.getAllElements().count) ?? 0
             if numTags > options.maxElemsToParse {
-                throw NSError(domain: "Readability", code: 1, userInfo: [NSLocalizedDescriptionKey: "Aborting parsing document; \(numTags) elements found"])
+                let message = "Aborting parsing document; " + String(numTags) + " elements found"
+                throw NSError(domain: "Readability", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
             }
         }
 
@@ -298,7 +301,7 @@ private extension Readability {
 
         let lang: String? = {
             guard let html = try? document.select("html").first() else { return nil }
-            let value = html.attrOrEmpty("lang")
+            let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
             return value.isEmpty ? nil : value
         }()
 
@@ -388,11 +391,13 @@ private extension Readability {
         var matchCache: [String: Bool] = [:]
         for element in elements {
             guard let attributes = element.getAttributes()?.asList() else { continue }
-            for attr in attributes where attr.getValue().isEmpty && booleanAttrs.contains(attr.getKey().lowercased()) {
-                let attrNameLower = attr.getKey().lowercased()
+            for attr in attributes where attr.getValueUTF8().isEmpty {
+                let keyBytes = attr.getKeyUTF8()
+                let attrNameLower = String(decoding: keyBytes, as: UTF8.self).lowercased()
+                if !booleanAttrs.contains(attrNameLower) { continue }
                 if !explicitSet.contains(attrNameLower) { continue }
                 if shouldPromoteBooleanAttributeValue(
-                    tagName: element.tagNameSafe(),
+                    tagName: String(decoding: element.tagNameUTF8(), as: UTF8.self),
                     attributes: element.getAttributes(),
                     attrName: attrNameLower,
                     sourceHTML: sourceHTML,
@@ -409,11 +414,20 @@ private extension Readability {
                                                     attrName: String,
                                                     sourceHTML: String,
                                                     matchCache: inout [String: Bool]) -> Bool {
-        let identifiers = ["id", "itemid", "src", "data-media-id", "data-uuid", "data-type", "data-aop"]
+        let identifiers = [
+            ReadabilityUTF8Arrays.id,
+            "itemid".utf8Array,
+            ReadabilityUTF8Arrays.src,
+            "data-media-id".utf8Array,
+            "data-uuid".utf8Array,
+            "data-type".utf8Array,
+            "data-aop".utf8Array
+        ]
         for key in identifiers {
-            guard let value = try? attributes?.getIgnoreCase(key: key), !value.isEmpty else { continue }
+            guard let valueBytes = try? attributes?.getIgnoreCase(key: key), !valueBytes.isEmpty else { continue }
+            let value = String(decoding: valueBytes, as: UTF8.self)
             if tagHasAttributeValue(tagName: tagName,
-                                    matchAttr: key,
+                                    matchAttr: String(decoding: key, as: UTF8.self),
                                     matchValue: value,
                                     targetAttr: attrName,
                                     sourceHTML: sourceHTML,
@@ -423,16 +437,22 @@ private extension Readability {
         }
 
         // Fallback: if the source contains an element with matching tag + itemtype + itemprop and the explicit value.
-        if let itemtype = try? attributes?.getIgnoreCase(key: "itemtype"),
-           let itemprop = try? attributes?.getIgnoreCase(key: "itemprop"),
-           !itemtype.isEmpty, !itemprop.isEmpty {
+        if let itemtypeBytes = try? attributes?.getIgnoreCase(key: "itemtype".utf8Array),
+           let itempropBytes = try? attributes?.getIgnoreCase(key: ReadabilityUTF8Arrays.itemprop),
+           !itemtypeBytes.isEmpty, !itempropBytes.isEmpty {
+            let itemtype = String(decoding: itemtypeBytes, as: UTF8.self)
+            let itemprop = String(decoding: itempropBytes, as: UTF8.self)
             let escapedItemtype = NSRegularExpression.escapedPattern(for: itemtype)
             let escapedItemprop = NSRegularExpression.escapedPattern(for: itemprop)
             let escapedAttr = NSRegularExpression.escapedPattern(for: attrName)
             let escapedTag = NSRegularExpression.escapedPattern(for: tagName)
-            let cacheKey = "itemtype|\(escapedTag)|\(escapedItemtype)|\(escapedItemprop)|\(escapedAttr)"
+            let cacheKey = "itemtype|" + escapedTag + "|" + escapedItemtype + "|" + escapedItemprop + "|" + escapedAttr
             if let cached = matchCache[cacheKey] { return cached }
-            let pattern = "<\\s*\(escapedTag)\\b[^>]*\\bitemtype\\s*=\\s*\"\(escapedItemtype)\"[^>]*\\bitemprop\\s*=\\s*\"\(escapedItemprop)\"[^>]*\\b\(attrName)\\s*=\\s*\"\(escapedAttr)\""
+            let pattern = "<\\s*" + escapedTag +
+                "\\b[^>]*\\bitemtype\\s*=\\s*\"" + escapedItemtype +
+                "\"[^>]*\\bitemprop\\s*=\\s*\"" + escapedItemprop +
+                "\"[^>]*\\b" + attrName +
+                "\\s*=\\s*\"" + escapedAttr + "\""
             let found = sourceHTML.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
             matchCache[cacheKey] = found
             return found
@@ -449,8 +469,8 @@ private extension Readability {
         let escapedValue = NSRegularExpression.escapedPattern(for: matchValue)
         let escapedTag = NSRegularExpression.escapedPattern(for: tagName)
         let escapedMatchAttr = NSRegularExpression.escapedPattern(for: matchAttr)
-        let pattern = "<\\s*\(escapedTag)\\b[^>]*\\b\(escapedMatchAttr)\\s*=\\s*\"\(escapedValue)\"[^>]*>"
-        let cacheKey = "id|\(escapedTag)|\(escapedMatchAttr)|\(escapedValue)|\(targetAttr)"
+        let pattern = "<\\s*" + escapedTag + "\\b[^>]*\\b" + escapedMatchAttr + "\\s*=\\s*\"" + escapedValue + "\"[^>]*>"
+        let cacheKey = "id|" + escapedTag + "|" + escapedMatchAttr + "|" + escapedValue + "|" + targetAttr
         if let cached = matchCache[cacheKey] { return cached }
         guard let range = sourceHTML.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else {
             matchCache[cacheKey] = false
@@ -458,7 +478,7 @@ private extension Readability {
         }
         let tag = String(sourceHTML[range])
         let escapedTarget = NSRegularExpression.escapedPattern(for: targetAttr)
-        let targetPattern = "\\b\(targetAttr)\\s*=\\s*\"\(escapedTarget)\""
+        let targetPattern = "\\b" + targetAttr + "\\s*=\\s*\"" + escapedTarget + "\""
         let found = tag.range(of: targetPattern, options: [.regularExpression, .caseInsensitive]) != nil
         matchCache[cacheKey] = found
         return found
@@ -495,7 +515,7 @@ private extension Readability {
         var result: [String] = []
         for attr in candidates {
             let escapedAttr = NSRegularExpression.escapedPattern(for: attr)
-            let pattern = "\\b\(escapedAttr)\\s*=\\s*\"\\s*\(escapedAttr)\\s*\""
+            let pattern = "\\b" + escapedAttr + "\\s*=\\s*\"\\s*" + escapedAttr + "\\s*\""
             if sourceHTML.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
                 result.append(attr)
             }
@@ -512,16 +532,17 @@ private extension Readability {
         let message = items.map { item -> String in
             if let element = item as? Element {
                 let attrPairs = element.getAttributes()?.asList().map { attr in
-                    "\(attr.getKey())=\"\(attr.getValue())\""
+                    attr.getKey() + "=\"" + attr.getValue() + "\""
                 }.joined(separator: " ") ?? ""
-                return "<\(element.tagNameSafe()) \(attrPairs)>"
+                let tagName = String(decoding: element.tagNameUTF8(), as: UTF8.self)
+                return "<" + tagName + " " + attrPairs + ">"
             } else if let text = item as? TextNode {
-                return "#text(\"\(text.getWholeText())\")"
+                return "#text(\"" + text.getWholeText() + "\")"
             } else {
                 return String(describing: item)
             }
         }.joined(separator: " ")
-        print("\(prefix) \(message)")
+        print(prefix + " " + message)
     }
 }
 
