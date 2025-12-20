@@ -1,0 +1,543 @@
+import Foundation
+import SwiftSoup
+
+public struct ReadabilityResult: Sendable {
+    public let title: String?
+    public let byline: String?
+    public let dir: String?
+    public let lang: String?
+    public let excerpt: String?
+    public let siteName: String?
+    public let publishedTime: String?
+    public let content: String
+    public let textContent: String
+    public let length: Int
+    public let readerable: Bool
+
+    public var contentHTML: String { content }
+}
+
+public struct ReadabilitySerializedResult<Content> {
+    public let title: String?
+    public let byline: String?
+    public let dir: String?
+    public let lang: String?
+    public let excerpt: String?
+    public let siteName: String?
+    public let publishedTime: String?
+    public let content: Content
+    public let textContent: String
+    public let length: Int
+    public let readerable: Bool
+}
+
+/// Public façade mirroring Mozilla Readability, backed by the Swift port of readability4j (Jsoup-based).
+public final class Readability {
+    private let html: String
+    private let url: URL
+    private let options: ReadabilityOptions
+    private let document: Document?
+
+    private let regEx: RegExUtil
+    private lazy var preprocessor = Preprocessor(regEx: regEx)
+    private lazy var metadataParser = MetadataParser(regEx: regEx)
+    private lazy var articleGrabber = ArticleGrabber(options: options, regEx: regEx)
+    private lazy var postprocessor = Postprocessor()
+
+    var debugEnabled: Bool { options.debug }
+    var nbTopCandidates: Int { options.nbTopCandidates }
+    var maxElemsToParse: Int { options.maxElemsToParse }
+    var keepClasses: Bool { options.keepClasses }
+    var allowedVideoRegex: NSRegularExpression { options.allowedVideoRegex ?? regEx.allowedVideoRegex }
+
+    public init(html: String, url: URL, options: ReadabilityOptions = ReadabilityOptions()) {
+        self.html = html
+        self.url = url
+        self.options = options
+        self.regEx = RegExUtil(allowedVideoRegex: options.allowedVideoRegex)
+        self.document = nil
+    }
+
+    private init(html: String, url: URL, document: Document?, options: ReadabilityOptions) {
+        self.html = html
+        self.url = url
+        self.options = options
+        self.regEx = RegExUtil(allowedVideoRegex: options.allowedVideoRegex)
+        self.document = document
+    }
+
+    public convenience init(document: Document, options: ReadabilityOptions = ReadabilityOptions()) {
+        let baseUri = document.location()
+        let resolvedURL = URL(string: baseUri) ?? URL(string: "about:blank")!
+        self.init(html: "", url: resolvedURL, document: document, options: options)
+    }
+
+    /// Run the full readability algorithm and return the extracted result.
+    public func parse() throws -> ReadabilityResult? {
+        guard let parsed = try parseArticle() else { return nil }
+        let textContent = (try? parsed.articleContent.text()) ?? ""
+        let contentHTML: String
+        if let serializer = options.serializer {
+            contentHTML = serializer(parsed.articleContent)
+        } else {
+            contentHTML = serializeArticleContent(
+                document: parsed.document,
+                articleContent: parsed.articleContent,
+                useXMLSerializer: options.useXMLSerializer,
+                isLiveDocument: parsed.isLiveDocument
+            )
+        }
+
+        return ReadabilityResult(
+            title: parsed.metadata.title,
+            byline: parsed.metadata.byline ?? articleGrabber.articleByline,
+            dir: articleGrabber.articleDir,
+            lang: parsed.lang,
+            excerpt: parsed.metadata.excerpt,
+            siteName: parsed.metadata.siteName,
+            publishedTime: parsed.metadata.publishedTime,
+            content: contentHTML,
+            textContent: textContent,
+            length: textContent.count,
+            readerable: parsed.readerable
+        )
+    }
+
+    public func parse<Content>(serializer: (Element) -> Content) throws -> ReadabilitySerializedResult<Content>? {
+        guard let parsed = try parseArticle() else { return nil }
+        let content = serializer(parsed.articleContent)
+        let textContent = (try? parsed.articleContent.text()) ?? ""
+        return ReadabilitySerializedResult(
+            title: parsed.metadata.title,
+            byline: parsed.metadata.byline ?? articleGrabber.articleByline,
+            dir: articleGrabber.articleDir,
+            lang: parsed.lang,
+            excerpt: parsed.metadata.excerpt,
+            siteName: parsed.metadata.siteName,
+            publishedTime: parsed.metadata.publishedTime,
+            content: content,
+            textContent: textContent,
+            length: textContent.count,
+            readerable: parsed.readerable
+        )
+    }
+
+    // MARK: Readerable heuristic
+    public static func isProbablyReaderable(html: String) -> Bool {
+        guard let doc = try? SwiftSoup.parse(html) else { return false }
+        return isProbablyReaderable(doc: doc)
+    }
+
+    public static func isProbablyReaderable(document: Document, options: ReaderableOptions = ReaderableOptions()) -> Bool {
+        return isProbablyReaderable(doc: document, options: options, visibilityChecker: options.visibilityChecker)
+    }
+
+    public static func isProbablyReaderable(document: Document, visibilityChecker: @escaping (Element) -> Bool) -> Bool {
+        return isProbablyReaderable(doc: document, options: ReaderableOptions(), visibilityChecker: visibilityChecker)
+    }
+
+    public struct ReaderableOptions {
+        public var minContentLength: Int
+        public var minScore: Double
+        public var visibilityChecker: ((Element) -> Bool)?
+
+        public init(minContentLength: Int = 140,
+                    minScore: Double = 20.0,
+                    visibilityChecker: ((Element) -> Bool)? = nil) {
+            self.minContentLength = minContentLength
+            self.minScore = minScore
+            self.visibilityChecker = visibilityChecker
+        }
+    }
+
+    public static func isProbablyReaderable(html: String, options: ReaderableOptions) -> Bool {
+        guard let doc = try? SwiftSoup.parse(html) else { return false }
+        return isProbablyReaderable(doc: doc, options: options, visibilityChecker: options.visibilityChecker)
+    }
+
+    public static func isProbablyReaderable(html: String, visibilityChecker: @escaping (Element) -> Bool) -> Bool {
+        guard let doc = try? SwiftSoup.parse(html) else { return false }
+        return isProbablyReaderable(doc: doc, options: ReaderableOptions(), visibilityChecker: visibilityChecker)
+    }
+
+    static func isProbablyReaderable(doc: Document,
+                                     options: ReaderableOptions = ReaderableOptions(),
+                                     visibilityChecker: ((Element) -> Bool)? = nil) -> Bool {
+        // Port of Readability-readerable.js
+        let minScore = options.minScore
+        let minContentLength = options.minContentLength
+
+        var nodes: [Element] = (try? doc.select("p, pre, article").array()) ?? []
+
+        if let brNodes = try? doc.select("div > br"), brNodes.count > 0 {
+            var set: [ObjectIdentifier: Element] = [:]
+            for node in nodes { set[ObjectIdentifier(node)] = node }
+            for br in brNodes {
+                if let parent = br.parent() {
+                    set[ObjectIdentifier(parent)] = parent
+                }
+            }
+            nodes = Array(set.values)
+        }
+
+        let unlikelyCandidates = try! NSRegularExpression(
+            pattern: "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
+            options: [.caseInsensitive]
+        )
+        let okMaybeItsACandidate = try! NSRegularExpression(
+            pattern: "and|article|body|column|content|main|mathjax|shadow",
+            options: [.caseInsensitive]
+        )
+        let displayNone = try! NSRegularExpression(pattern: "display\\s*:\\s*none", options: [.caseInsensitive])
+
+        func matches(_ regex: NSRegularExpression, _ string: String) -> Bool {
+            regex.firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.utf16.count)) != nil
+        }
+
+        func defaultVisibilityChecker(_ node: Element) -> Bool {
+            let style = node.attrOrEmpty("style")
+            if matches(displayNone, style) { return false }
+            if node.hasAttr("hidden") { return false }
+            if node.hasAttr("aria-hidden"), node.attrOrEmpty("aria-hidden") == "true" {
+                let className = node.classNameSafe()
+                if !className.contains("fallback-image") { return false }
+            }
+            return true
+        }
+
+        func isDescendantOfListItem(_ node: Element) -> Bool {
+            var parent = node.parent()
+            while let p = parent {
+                if p.tagNameSafe() == "li" { return true }
+                parent = p.parent()
+            }
+            return false
+        }
+
+        var score = 0.0
+        let isVisible: (Element) -> Bool = visibilityChecker ?? options.visibilityChecker ?? defaultVisibilityChecker
+
+        for node in nodes {
+            if !isVisible(node) { continue }
+
+            let matchString = node.classNameSafe() + " " + node.idSafe()
+            if matches(unlikelyCandidates, matchString), !matches(okMaybeItsACandidate, matchString) {
+                continue
+            }
+
+            if node.tagNameSafe() == "p", isDescendantOfListItem(node) {
+                continue
+            }
+
+            let textLength = textContentPreservingWhitespace(of: node)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .count
+            if textLength < minContentLength { continue }
+
+            score += sqrt(Double(textLength - minContentLength))
+            if score > minScore { return true }
+        }
+        return false
+    }
+
+}
+
+private extension Readability {
+    struct ParsedArticle {
+        let document: Document
+        let articleContent: Element
+        let metadata: ArticleMetadata
+        let readerable: Bool
+        let lang: String?
+        let isLiveDocument: Bool
+    }
+
+    func parseArticle() throws -> ParsedArticle? {
+        let document: Document
+        let isLiveDocument: Bool
+        if let provided = self.document {
+            document = provided
+            isLiveDocument = true
+        } else {
+            document = try SwiftSoup.parse(html, url.absoluteString)
+            isLiveDocument = false
+        }
+        let readerable = Readability.isProbablyReaderable(doc: document)
+
+        if options.maxElemsToParse > 0 {
+            let numTags = (try? document.getAllElements().count) ?? 0
+            if numTags > options.maxElemsToParse {
+                throw NSError(domain: "Readability", code: 1, userInfo: [NSLocalizedDescriptionKey: "Aborting parsing document; \(numTags) elements found"])
+            }
+        }
+
+        let metadata = metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
+        preprocessor.prepareDocument(document)
+        guard let articleContent = articleGrabber.grabArticle(doc: document, metadata: metadata) else { return nil }
+
+        postprocessor.postProcessContent(
+            originalDocument: document,
+            articleContent: articleContent,
+            articleUri: url.absoluteString,
+            keepClasses: options.keepClasses,
+            classesToPreserve: options.classesToPreserve
+        )
+
+        if (metadata.excerpt ?? "").isEmpty {
+            // SwiftSoup's getElementsByTag caches tag indexes and can become stale after DOM mutations.
+            // Prefer select("p") here to mirror Readability.js's document-order selection reliably.
+            if let paragraphs = try? articleContent.select("p"),
+               let firstPara = paragraphs.first() {
+                let excerpt = textContentPreservingWhitespace(of: firstPara)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !excerpt.isEmpty {
+                    metadata.excerpt = excerpt
+                }
+            }
+        }
+
+        let lang: String? = {
+            guard let html = try? document.select("html").first() else { return nil }
+            let value = html.attrOrEmpty("lang")
+            return value.isEmpty ? nil : value
+        }()
+
+        debugLog(["Grabbed:", articleContent])
+
+        return ParsedArticle(
+            document: document,
+            articleContent: articleContent,
+            metadata: metadata,
+            readerable: readerable,
+            lang: lang,
+            isLiveDocument: isLiveDocument
+        )
+    }
+
+    func serializeArticleContent(document: Document,
+                                 articleContent: Element,
+                                 useXMLSerializer: Bool,
+                                 isLiveDocument: Bool) -> String {
+        let sourceHTML: String
+        if useXMLSerializer {
+            if !html.isEmpty {
+                sourceHTML = html
+            } else {
+                sourceHTML = (try? document.outerHtml()) ?? ""
+            }
+        } else {
+            sourceHTML = ""
+        }
+        let explicitBooleanAttrs = useXMLSerializer ? explicitBooleanAttributes(in: sourceHTML) : []
+        if useXMLSerializer, !isLiveDocument {
+            normalizeBooleanAttributes(in: articleContent, sourceHTML: sourceHTML, explicitBooleanAttrs: explicitBooleanAttrs)
+            let serializationDoc = try! SwiftSoup.parse("", url.absoluteString)
+            let outputSettings = serializationDoc.outputSettings()
+            outputSettings.prettyPrint(pretty: false)
+            outputSettings.syntax(syntax: .xml)
+            try? serializationDoc.body()?.appendChild(articleContent)
+            return (try? articleContent.html()) ?? ""
+        }
+
+        let outputSettings = document.outputSettings()
+        let originalPrettyPrint = outputSettings.prettyPrint()
+        let originalSyntax = outputSettings.syntax()
+        outputSettings.prettyPrint(pretty: false)
+        outputSettings.syntax(syntax: useXMLSerializer ? .xml : .html)
+        if useXMLSerializer {
+            normalizeBooleanAttributes(in: articleContent, sourceHTML: sourceHTML, explicitBooleanAttrs: explicitBooleanAttrs)
+        }
+        let html = (try? articleContent.html()) ?? ""
+        outputSettings.prettyPrint(pretty: originalPrettyPrint)
+        outputSettings.syntax(syntax: originalSyntax)
+        return html
+    }
+
+    func normalizeBooleanAttributes(in root: Element, sourceHTML: String, explicitBooleanAttrs: [String]) {
+        guard !sourceHTML.isEmpty else { return }
+        guard !explicitBooleanAttrs.isEmpty else { return }
+        let explicitSet = Set(explicitBooleanAttrs)
+        let booleanAttrs: Set<String> = [
+            "allowfullscreen",
+            "async",
+            "autofocus",
+            "autoplay",
+            "checked",
+            "controls",
+            "default",
+            "defer",
+            "disabled",
+            "formnovalidate",
+            "hidden",
+            "ismap",
+            "itemscope",
+            "loop",
+            "multiple",
+            "muted",
+            "novalidate",
+            "open",
+            "playsinline",
+            "readonly",
+            "required",
+            "reversed",
+            "selected",
+            "typemustmatch"
+        ]
+
+        guard let elements = try? root.getAllElements() else { return }
+        var matchCache: [String: Bool] = [:]
+        for element in elements {
+            guard let attributes = element.getAttributes()?.asList() else { continue }
+            for attr in attributes where attr.getValue().isEmpty && booleanAttrs.contains(attr.getKey().lowercased()) {
+                let attrNameLower = attr.getKey().lowercased()
+                if !explicitSet.contains(attrNameLower) { continue }
+                if shouldPromoteBooleanAttributeValue(
+                    tagName: element.tagNameSafe(),
+                    attributes: element.getAttributes(),
+                    attrName: attrNameLower,
+                    sourceHTML: sourceHTML,
+                    matchCache: &matchCache
+                ) {
+                    try? element.attr(attr.getKey(), attr.getKey())
+                }
+            }
+        }
+    }
+
+    private func shouldPromoteBooleanAttributeValue(tagName: String,
+                                                    attributes: Attributes?,
+                                                    attrName: String,
+                                                    sourceHTML: String,
+                                                    matchCache: inout [String: Bool]) -> Bool {
+        let identifiers = ["id", "itemid", "src", "data-media-id", "data-uuid", "data-type", "data-aop"]
+        for key in identifiers {
+            guard let value = try? attributes?.getIgnoreCase(key: key), !value.isEmpty else { continue }
+            if tagHasAttributeValue(tagName: tagName,
+                                    matchAttr: key,
+                                    matchValue: value,
+                                    targetAttr: attrName,
+                                    sourceHTML: sourceHTML,
+                                    matchCache: &matchCache) {
+                return true
+            }
+        }
+
+        // Fallback: if the source contains an element with matching tag + itemtype + itemprop and the explicit value.
+        if let itemtype = try? attributes?.getIgnoreCase(key: "itemtype"),
+           let itemprop = try? attributes?.getIgnoreCase(key: "itemprop"),
+           !itemtype.isEmpty, !itemprop.isEmpty {
+            let escapedItemtype = NSRegularExpression.escapedPattern(for: itemtype)
+            let escapedItemprop = NSRegularExpression.escapedPattern(for: itemprop)
+            let escapedAttr = NSRegularExpression.escapedPattern(for: attrName)
+            let escapedTag = NSRegularExpression.escapedPattern(for: tagName)
+            let cacheKey = "itemtype|\(escapedTag)|\(escapedItemtype)|\(escapedItemprop)|\(escapedAttr)"
+            if let cached = matchCache[cacheKey] { return cached }
+            let pattern = "<\\s*\(escapedTag)\\b[^>]*\\bitemtype\\s*=\\s*\"\(escapedItemtype)\"[^>]*\\bitemprop\\s*=\\s*\"\(escapedItemprop)\"[^>]*\\b\(attrName)\\s*=\\s*\"\(escapedAttr)\""
+            let found = sourceHTML.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+            matchCache[cacheKey] = found
+            return found
+        }
+        return false
+    }
+
+    private func tagHasAttributeValue(tagName: String,
+                                      matchAttr: String,
+                                      matchValue: String,
+                                      targetAttr: String,
+                                      sourceHTML: String,
+                                      matchCache: inout [String: Bool]) -> Bool {
+        let escapedValue = NSRegularExpression.escapedPattern(for: matchValue)
+        let escapedTag = NSRegularExpression.escapedPattern(for: tagName)
+        let escapedMatchAttr = NSRegularExpression.escapedPattern(for: matchAttr)
+        let pattern = "<\\s*\(escapedTag)\\b[^>]*\\b\(escapedMatchAttr)\\s*=\\s*\"\(escapedValue)\"[^>]*>"
+        let cacheKey = "id|\(escapedTag)|\(escapedMatchAttr)|\(escapedValue)|\(targetAttr)"
+        if let cached = matchCache[cacheKey] { return cached }
+        guard let range = sourceHTML.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else {
+            matchCache[cacheKey] = false
+            return false
+        }
+        let tag = String(sourceHTML[range])
+        let escapedTarget = NSRegularExpression.escapedPattern(for: targetAttr)
+        let targetPattern = "\\b\(targetAttr)\\s*=\\s*\"\(escapedTarget)\""
+        let found = tag.range(of: targetPattern, options: [.regularExpression, .caseInsensitive]) != nil
+        matchCache[cacheKey] = found
+        return found
+    }
+
+    private func explicitBooleanAttributes(in sourceHTML: String) -> [String] {
+        guard !sourceHTML.isEmpty else { return [] }
+        let candidates = [
+            "allowfullscreen",
+            "async",
+            "autofocus",
+            "autoplay",
+            "checked",
+            "controls",
+            "default",
+            "defer",
+            "disabled",
+            "formnovalidate",
+            "hidden",
+            "ismap",
+            "itemscope",
+            "loop",
+            "multiple",
+            "muted",
+            "novalidate",
+            "open",
+            "playsinline",
+            "readonly",
+            "required",
+            "reversed",
+            "selected",
+            "typemustmatch"
+        ]
+        var result: [String] = []
+        for attr in candidates {
+            let escapedAttr = NSRegularExpression.escapedPattern(for: attr)
+            let pattern = "\\b\(escapedAttr)\\s*=\\s*\"\\s*\(escapedAttr)\\s*\""
+            if sourceHTML.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+                result.append(attr)
+            }
+        }
+        return result
+    }
+}
+
+// MARK: - Debug logging (parity with Readability.js)
+
+private extension Readability {
+    func debugLog(_ items: [Any], prefix: String = "Reader: (Readability)") {
+        guard options.debug else { return }
+        let message = items.map { item -> String in
+            if let element = item as? Element {
+                let attrPairs = element.getAttributes()?.asList().map { attr in
+                    "\(attr.getKey())=\"\(attr.getValue())\""
+                }.joined(separator: " ") ?? ""
+                return "<\(element.tagNameSafe()) \(attrPairs)>"
+            } else if let text = item as? TextNode {
+                return "#text(\"\(text.getWholeText())\")"
+            } else {
+                return String(describing: item)
+            }
+        }.joined(separator: " ")
+        print("\(prefix) \(message)")
+    }
+}
+
+private func getInnerText(_ element: Element) -> String {
+    return ((try? element.text()) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func textContentPreservingWhitespace(of node: Node) -> String {
+    if let text = node as? TextNode {
+        return text.getWholeText()
+    }
+    if let data = node as? DataNode {
+        return data.getWholeData()
+    }
+    if let element = node as? Element {
+        return element.getChildNodes().map(textContentPreservingWhitespace(of:)).joined()
+    }
+    return ""
+}

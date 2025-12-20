@@ -30,6 +30,11 @@ playground.xcworkspace
 # .swiftpm
 
 .build/
+/Packages
+/.build
+
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 
 # CocoaPods
 #
@@ -60,3 +65,7 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+.DS_Store
+DerivedData/
+.netrc
