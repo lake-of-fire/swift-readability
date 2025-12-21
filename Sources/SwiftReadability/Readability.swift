@@ -33,6 +33,18 @@ public struct ReadabilitySerializedResult<Content> {
 
 /// Public façade mirroring Mozilla Readability, backed by the Swift port of readability4j (Jsoup-based).
 public final class Readability {
+    private static let unlikelyCandidatesRegex = try! NSRegularExpression(
+        pattern: "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
+        options: [.caseInsensitive]
+    )
+    private static let okMaybeItsACandidateRegex = try! NSRegularExpression(
+        pattern: "and|article|body|column|content|main|mathjax|shadow",
+        options: [.caseInsensitive]
+    )
+    private static let displayNoneRegex = try! NSRegularExpression(
+        pattern: "display\\s*:\\s*none",
+        options: [.caseInsensitive]
+    )
     private let html: String
     private let url: URL
     private let options: ReadabilityOptions
@@ -101,6 +113,65 @@ public final class Readability {
             length: textContent.count,
             readerable: parsed.readerable
         )
+    }
+
+    @_spi(Bench)
+    public struct ReadabilityTimings: Sendable {
+        public let milliseconds: [String: Double]
+
+        @_spi(Bench)
+        public init(milliseconds: [String: Double]) {
+            self.milliseconds = milliseconds
+        }
+    }
+
+    private final class TimingCollector: TimingSink {
+        var milliseconds: [String: Double] = [:]
+
+        func measure<T>(_ label: String, _ block: () throws -> T) rethrows -> T {
+            let start = DispatchTime.now().uptimeNanoseconds
+            let result = try block()
+            let end = DispatchTime.now().uptimeNanoseconds
+            let elapsedMs = Double(end - start) / 1_000_000.0
+            milliseconds[label, default: 0.0] += elapsedMs
+            return result
+        }
+    }
+
+    @_spi(Bench)
+    public func parseWithTimings() throws -> (ReadabilityResult?, ReadabilityTimings) {
+        let timing = TimingCollector()
+        guard let parsed = try parseArticle(timing: timing) else {
+            return (nil, ReadabilityTimings(milliseconds: timing.milliseconds))
+        }
+
+        let textContent = timing.measure("textContent") { (try? parsed.articleContent.text()) ?? "" }
+        let contentHTML: String = timing.measure("serialize") {
+            if let serializer = options.serializer {
+                return serializer(parsed.articleContent)
+            }
+            return serializeArticleContent(
+                document: parsed.document,
+                articleContent: parsed.articleContent,
+                useXMLSerializer: options.useXMLSerializer,
+                isLiveDocument: parsed.isLiveDocument
+            )
+        }
+
+        let result = ReadabilityResult(
+            title: parsed.metadata.title,
+            byline: parsed.metadata.byline ?? articleGrabber.articleByline,
+            dir: articleGrabber.articleDir,
+            lang: parsed.lang,
+            excerpt: parsed.metadata.excerpt,
+            siteName: parsed.metadata.siteName,
+            publishedTime: parsed.metadata.publishedTime,
+            content: contentHTML,
+            textContent: textContent,
+            length: textContent.count,
+            readerable: parsed.readerable
+        )
+        return (result, ReadabilityTimings(milliseconds: timing.milliseconds))
     }
 
     public func parse<Content>(serializer: (Element) -> Content) throws -> ReadabilitySerializedResult<Content>? {
@@ -180,15 +251,9 @@ public final class Readability {
             nodes = Array(set.values)
         }
 
-        let unlikelyCandidates = try! NSRegularExpression(
-            pattern: "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
-            options: [.caseInsensitive]
-        )
-        let okMaybeItsACandidate = try! NSRegularExpression(
-            pattern: "and|article|body|column|content|main|mathjax|shadow",
-            options: [.caseInsensitive]
-        )
-        let displayNone = try! NSRegularExpression(pattern: "display\\s*:\\s*none", options: [.caseInsensitive])
+        let unlikelyCandidates = Readability.unlikelyCandidatesRegex
+        let okMaybeItsACandidate = Readability.okMaybeItsACandidateRegex
+        let displayNone = Readability.displayNoneRegex
 
         func matches(_ regex: NSRegularExpression, _ string: String) -> Bool {
             regex.firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.utf16.count)) != nil
@@ -231,11 +296,11 @@ public final class Readability {
                 continue
             }
 
-            let textLength = textContentPreservingWhitespace(of: node)
+            let trimmedText = textContentPreservingWhitespace(of: node)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .count
+            if trimmedText.utf8.count < minContentLength { continue }
+            let textLength = trimmedText.count
             if textLength < minContentLength { continue }
-
             score += sqrt(Double(textLength - minContentLength))
             if score > minScore { return true }
         }
@@ -254,17 +319,28 @@ private extension Readability {
         let isLiveDocument: Bool
     }
 
-    func parseArticle() throws -> ParsedArticle? {
+    private func parseArticle(timing: TimingSink? = nil) throws -> ParsedArticle? {
         let document: Document
         let isLiveDocument: Bool
         if let provided = self.document {
             document = provided
             isLiveDocument = true
         } else {
-            document = try SwiftSoup.parse(html, url.absoluteString)
+            if let timing {
+                document = try timing.measure("parseDocument") {
+                    try SwiftSoup.parse(html, url.absoluteString)
+                }
+            } else {
+                document = try SwiftSoup.parse(html, url.absoluteString)
+            }
             isLiveDocument = false
         }
-        let readerable = Readability.isProbablyReaderable(doc: document)
+        let readerable: Bool
+        if let timing {
+            readerable = timing.measure("readerable") { Readability.isProbablyReaderable(doc: document) }
+        } else {
+            readerable = Readability.isProbablyReaderable(doc: document)
+        }
 
         if options.maxElemsToParse > 0 {
             let numTags = (try? document.getAllElements().count) ?? 0
@@ -274,36 +350,91 @@ private extension Readability {
             }
         }
 
-        let metadata = metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
-        preprocessor.prepareDocument(document)
-        guard let articleContent = articleGrabber.grabArticle(doc: document, metadata: metadata) else { return nil }
+        let metadata: ArticleMetadata
+        if let timing {
+            metadata = timing.measure("metadata") {
+                metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
+            }
+            _ = timing.measure("preprocess") {
+                preprocessor.prepareDocument(document)
+            }
+        } else {
+            metadata = metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
+            preprocessor.prepareDocument(document)
+        }
 
-        postprocessor.postProcessContent(
-            originalDocument: document,
-            articleContent: articleContent,
-            articleUri: url.absoluteString,
-            keepClasses: options.keepClasses,
-            classesToPreserve: options.classesToPreserve
-        )
+        let articleContent: Element
+        if let timing {
+            let content = timing.measure("grabArticle") {
+                articleGrabber.grabArticle(doc: document, metadata: metadata, timing: timing)
+            }
+            guard let content else { return nil }
+            articleContent = content
+        } else {
+            guard let content = articleGrabber.grabArticle(doc: document, metadata: metadata) else { return nil }
+            articleContent = content
+        }
+
+        if let timing {
+            _ = timing.measure("postprocess") {
+                postprocessor.postProcessContent(
+                    originalDocument: document,
+                    articleContent: articleContent,
+                    articleUri: url.absoluteString,
+                    keepClasses: options.keepClasses,
+                    classesToPreserve: options.classesToPreserve
+                )
+            }
+        } else {
+            postprocessor.postProcessContent(
+                originalDocument: document,
+                articleContent: articleContent,
+                articleUri: url.absoluteString,
+                keepClasses: options.keepClasses,
+                classesToPreserve: options.classesToPreserve
+            )
+        }
 
         if (metadata.excerpt ?? "").isEmpty {
             // SwiftSoup's getElementsByTag caches tag indexes and can become stale after DOM mutations.
             // Prefer select("p") here to mirror Readability.js's document-order selection reliably.
-            if let paragraphs = try? articleContent.select("p"),
-               let firstPara = paragraphs.first() {
-                let excerpt = textContentPreservingWhitespace(of: firstPara)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !excerpt.isEmpty {
-                    metadata.excerpt = excerpt
+            if let timing {
+                _ = timing.measure("excerpt") {
+                    if let paragraphs = try? articleContent.select("p"),
+                       let firstPara = paragraphs.first() {
+                        let excerpt = textContentPreservingWhitespace(of: firstPara)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !excerpt.isEmpty {
+                            metadata.excerpt = excerpt
+                        }
+                    }
+                }
+            } else {
+                if let paragraphs = try? articleContent.select("p"),
+                   let firstPara = paragraphs.first() {
+                    let excerpt = textContentPreservingWhitespace(of: firstPara)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !excerpt.isEmpty {
+                        metadata.excerpt = excerpt
+                    }
                 }
             }
         }
 
-        let lang: String? = {
-            guard let html = try? document.select("html").first() else { return nil }
-            let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
-            return value.isEmpty ? nil : value
-        }()
+        let lang: String?
+        if let timing {
+            lang = timing.measure("lang") {
+                guard let html = try? document.select("html").first() else { return nil }
+                let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
+                return value.isEmpty ? nil : value
+            }
+        } else {
+            lang = {
+                guard let html = try? document.select("html").first() else { return nil }
+                let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
+                return value.isEmpty ? nil : value
+            }()
+        }
 
         debugLog(["Grabbed:", articleContent])
 
@@ -546,10 +677,6 @@ private extension Readability {
     }
 }
 
-private func getInnerText(_ element: Element) -> String {
-    return ((try? element.text()) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
 private func textContentPreservingWhitespace(of node: Node) -> String {
     if let text = node as? TextNode {
         return text.getWholeText()
@@ -558,7 +685,27 @@ private func textContentPreservingWhitespace(of node: Node) -> String {
         return data.getWholeData()
     }
     if let element = node as? Element {
-        return element.getChildNodes().map(textContentPreservingWhitespace(of:)).joined()
+        return collectTextPreservingWhitespace(from: element)
     }
     return ""
+}
+
+private func collectTextPreservingWhitespace(from element: Element) -> String {
+    var output: [String] = []
+    output.reserveCapacity(8)
+    var stack = Array(element.getChildNodes().reversed())
+    while let node = stack.popLast() {
+        if let text = node as? TextNode {
+            output.append(text.getWholeText())
+        } else if let data = node as? DataNode {
+            output.append(data.getWholeData())
+        } else if let el = node as? Element {
+            let children = el.getChildNodes()
+            if !children.isEmpty {
+                stack.append(contentsOf: children.reversed())
+            }
+        }
+    }
+    if output.isEmpty { return "" }
+    return output.joined()
 }

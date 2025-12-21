@@ -36,7 +36,7 @@ class ProcessorBase {
         var next: Node? = node
         while let current = next {
             if let element = current as? Element { return element }
-            if let text = current as? TextNode, regEx.isWhitespace(text.text()) {
+            if let text = current as? TextNode, regEx.isWhitespace(text.getWholeText()) {
                 next = current.nextSibling()
                 continue
             }
@@ -52,6 +52,24 @@ class ProcessorBase {
             return regEx.normalize(textContent)
         }
         return textContent
+    }
+
+    /// Fast check for any non-whitespace text descendant without serializing full text.
+    func hasNonWhitespaceText(_ element: Element) -> Bool {
+        var stack = element.getChildNodes()
+        while let node = stack.popLast() {
+            if let text = node as? TextNode {
+                if text.getWholeText().rangeOfCharacter(from: .whitespacesAndNewlines.inverted) != nil {
+                    return true
+                }
+            } else if let el = node as? Element {
+                let children = el.getChildNodes()
+                if !children.isEmpty {
+                    stack.append(contentsOf: children)
+                }
+            }
+        }
+        return false
     }
 
     /// Fast length comparisons using UTF-8 byte count as an upper bound.

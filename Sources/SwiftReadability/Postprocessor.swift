@@ -2,7 +2,7 @@ import Foundation
 import SwiftSoup
 
 /// Final cleanup after article extraction.
-final class Postprocessor {
+final class Postprocessor: ProcessorBase {
     private let classesToPreserve: Set<String> = ["page"]
     private let srcsetUrlPattern = try! NSRegularExpression(pattern: "(\\S+)(\\s+[\\d.]+[xw])?(\\s*(?:,|$))", options: [])
 
@@ -57,8 +57,7 @@ final class Postprocessor {
     }
 
     private func isElementWithoutContent(_ node: Element) -> Bool {
-        let textValue = (try? node.text()) ?? ""
-        let textBlank = textValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let textBlank = !hasNonWhitespaceText(node)
         let childCount = node.children().count
         if textBlank && childCount == 0 { return true }
         // Avoid SwiftSoup tag-query caching; this must reflect current DOM state.

@@ -1,5 +1,5 @@
 import Foundation
-import SwiftReadability
+@_spi(Bench) import SwiftReadability
 
 struct BenchOptions {
     var fixturesPath: String
@@ -7,6 +7,7 @@ struct BenchOptions {
     var warmup: Int
     var filter: String?
     var useXMLSerializer: Bool
+    var timings: Bool
 }
 
 struct Fixture {
@@ -21,6 +22,7 @@ func parseArgs() -> BenchOptions {
     var warmup = 1
     var filter: String?
     var useXMLSerializer = false
+    var timings = false
 
     var i = 1
     while i < CommandLine.arguments.count {
@@ -48,6 +50,8 @@ func parseArgs() -> BenchOptions {
             }
         case "--xml":
             useXMLSerializer = true
+        case "--timings":
+            timings = true
         default:
             break
         }
@@ -59,7 +63,8 @@ func parseArgs() -> BenchOptions {
         iterations: iterations,
         warmup: warmup,
         filter: filter,
-        useXMLSerializer: useXMLSerializer
+        useXMLSerializer: useXMLSerializer,
+        timings: timings
     )
 }
 
@@ -108,6 +113,9 @@ func main() {
 
     print("Fixtures: " + String(fixtures.count))
     print("Iterations: " + String(options.iterations) + ", warmup: " + String(options.warmup))
+    if options.timings {
+        print("Timings: enabled")
+    }
 
     var totalNanos: UInt64 = 0
     var totalRuns = 0
@@ -116,6 +124,7 @@ func main() {
         var optionsStruct = ReadabilityOptions()
         optionsStruct.useXMLSerializer = options.useXMLSerializer
         let reader = Readability(html: fixture.html, url: fixture.url, options: optionsStruct)
+        var lastTimings: Readability.ReadabilityTimings?
 
         for _ in 0..<options.warmup {
             _ = try? reader.parse()
@@ -125,7 +134,13 @@ func main() {
         for _ in 0..<options.iterations {
             let start = DispatchTime.now().uptimeNanoseconds
             autoreleasepool {
-                _ = try? reader.parse()
+                if options.timings {
+                    let (result, timing) = (try? reader.parseWithTimings()) ?? (nil, Readability.ReadabilityTimings(milliseconds: [:]))
+                    _ = result
+                    lastTimings = timing
+                } else {
+                    _ = try? reader.parse()
+                }
             }
             let end = DispatchTime.now().uptimeNanoseconds
             elapsed += (end - start)
@@ -135,6 +150,12 @@ func main() {
         totalNanos += elapsed
         totalRuns += options.iterations
         print(fixture.name + ": " + formatMillis(avg))
+        if options.timings, let lastTimings {
+            let sorted = lastTimings.milliseconds.sorted { $0.key < $1.key }
+            for (key, value) in sorted {
+                print("  " + key + ": " + String(format: "%.2f", value) + "ms")
+            }
+        }
     }
 
     let overallAvg = totalRuns > 0 ? totalNanos / UInt64(totalRuns) : 0

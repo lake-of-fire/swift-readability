@@ -132,9 +132,7 @@ final class Preprocessor: ProcessorBase {
             if element.children().count != 1 {
                 return false
             }
-            let text = (try? element.text()) ?? ""
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
+            if hasNonWhitespaceText(element) {
                 return false
             }
             current = element.children().firstSafe

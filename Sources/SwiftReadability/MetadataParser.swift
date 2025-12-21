@@ -4,6 +4,38 @@ import SwiftSoup
 /// Port of Readability.js metadata extraction (JSON-LD + meta tags).
 final class MetadataParser: ProcessorBase {
     private let regEx: RegExUtil
+    private static let schemaDotOrgRegex = try! NSRegularExpression(
+        pattern: "^https?\\:\\/\\/schema\\.org\\/?$",
+        options: [.caseInsensitive]
+    )
+    private static let jsonLdArticleTypesRegex = try! NSRegularExpression(
+        pattern: "^Article|AdvertiserContentArticle|NewsArticle|AnalysisNewsArticle|AskPublicNewsArticle|BackgroundNewsArticle|OpinionNewsArticle|ReportageNewsArticle|ReviewNewsArticle|Report|SatiricalArticle|ScholarlyArticle|MedicalScholarlyArticle|SocialMediaPosting|BlogPosting|LiveBlogPosting|DiscussionForumPosting|TechArticle|APIReference$",
+        options: []
+    )
+    private static let metaPropertyPattern = try! NSRegularExpression(
+        pattern: "\\s*(article|dc|dcterm|og|twitter)\\s*:\\s*(author|creator|description|published_time|title|site_name)\\s*",
+        options: [.caseInsensitive]
+    )
+    private static let metaNamePattern = try! NSRegularExpression(
+        pattern: "^\\s*(?:(dc|dcterm|og|twitter|parsely|weibo:(article|webpage))\\s*[-\\.:]\\s*)?(author|creator|pub-date|description|title|site_name)\\s*$",
+        options: [.caseInsensitive]
+    )
+    private static let namedEntityRegex = try! NSRegularExpression(
+        pattern: "&(quot|amp|apos|lt|gt);",
+        options: []
+    )
+    private static let numericEntityRegex = try! NSRegularExpression(
+        pattern: "&#(?:x([0-9a-f]+)|([0-9]+));",
+        options: [.caseInsensitive]
+    )
+    private static let titleSeparatorRegexCI = try! NSRegularExpression(
+        pattern: "\\s[\\|\\-–—\\\\/>»]\\s",
+        options: [.caseInsensitive]
+    )
+    private static let titleSeparatorRegex = try! NSRegularExpression(
+        pattern: "\\s[\\|\\-–—\\\\/>»]\\s",
+        options: []
+    )
 
     init(regEx: RegExUtil = RegExUtil()) {
         self.regEx = regEx
@@ -109,15 +141,8 @@ final class MetadataParser: ProcessorBase {
 
     private func getMetaValues(_ document: Document) -> [String: String] {
         var values: [String: String] = [:]
-
-        let propertyPattern = try! NSRegularExpression(
-            pattern: "\\s*(article|dc|dcterm|og|twitter)\\s*:\\s*(author|creator|description|published_time|title|site_name)\\s*",
-            options: [.caseInsensitive]
-        )
-        let namePattern = try! NSRegularExpression(
-            pattern: "^\\s*(?:(dc|dcterm|og|twitter|parsely|weibo:(article|webpage))\\s*[-\\.:]\\s*)?(author|creator|pub-date|description|title|site_name)\\s*$",
-            options: [.caseInsensitive]
-        )
+        let propertyPattern = MetadataParser.metaPropertyPattern
+        let namePattern = MetadataParser.metaNamePattern
 
         guard let metas = try? document.select("meta") else { return values }
         for element in metas {
@@ -172,12 +197,6 @@ final class MetadataParser: ProcessorBase {
     private func getJSONLDMetadata(_ document: Document) -> JSONLDMetadata {
         guard let scripts = try? document.select("script[type=application/ld+json]") else { return JSONLDMetadata() }
 
-        let schemaDotOrg = try! NSRegularExpression(pattern: "^https?\\:\\/\\/schema\\.org\\/?$", options: [.caseInsensitive])
-        let jsonLdArticleTypes = try! NSRegularExpression(
-            pattern: "^Article|AdvertiserContentArticle|NewsArticle|AnalysisNewsArticle|AskPublicNewsArticle|BackgroundNewsArticle|OpinionNewsArticle|ReportageNewsArticle|ReviewNewsArticle|Report|SatiricalArticle|ScholarlyArticle|MedicalScholarlyArticle|SocialMediaPosting|BlogPosting|LiveBlogPosting|DiscussionForumPosting|TechArticle|APIReference$",
-            options: []
-        )
-
         func matches(_ regex: NSRegularExpression, _ string: String) -> Bool {
             regex.firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.utf16.count)) != nil
         }
@@ -210,11 +229,11 @@ final class MetadataParser: ProcessorBase {
             let contextMatches: Bool = {
                 guard let ctx = candidate["@context"] else { return false }
                 if let ctxStr = ctx as? String {
-                    return matches(schemaDotOrg, ctxStr)
+                    return matches(MetadataParser.schemaDotOrgRegex, ctxStr)
                 }
                 if let ctxDict = ctx as? [String: Any],
                    let vocab = ctxDict["@vocab"] as? String {
-                    return matches(schemaDotOrg, vocab)
+                    return matches(MetadataParser.schemaDotOrgRegex, vocab)
                 }
                 return false
             }()
@@ -286,11 +305,11 @@ final class MetadataParser: ProcessorBase {
     }
 
     private func matchesType(_ typeValue: String) -> Bool {
-        let jsonLdArticleTypes = try! NSRegularExpression(
-            pattern: "^Article|AdvertiserContentArticle|NewsArticle|AnalysisNewsArticle|AskPublicNewsArticle|BackgroundNewsArticle|OpinionNewsArticle|ReportageNewsArticle|ReviewNewsArticle|Report|SatiricalArticle|ScholarlyArticle|MedicalScholarlyArticle|SocialMediaPosting|BlogPosting|LiveBlogPosting|DiscussionForumPosting|TechArticle|APIReference$",
-            options: []
-        )
-        return jsonLdArticleTypes.firstMatch(in: typeValue, options: [], range: NSRange(location: 0, length: typeValue.utf16.count)) != nil
+        return MetadataParser.jsonLdArticleTypesRegex.firstMatch(
+            in: typeValue,
+            options: [],
+            range: NSRange(location: 0, length: typeValue.utf16.count)
+        ) != nil
     }
 
     // MARK: - Helpers
@@ -312,17 +331,15 @@ final class MetadataParser: ProcessorBase {
         ]
 
         // Replace common named entities.
-        let named = try! NSRegularExpression(pattern: "&(quot|amp|apos|lt|gt);", options: [])
-        string = replaceMatches(named, in: string) { match, nsString in
+        string = replaceMatches(MetadataParser.namedEntityRegex, in: string) { match, nsString in
             guard match.numberOfRanges >= 2 else { return "" }
             let name = nsString.substring(with: match.range(at: 1))
             return htmlEscapeMap[name] ?? ""
         }
 
         // Replace numeric entities.
-        let numeric = try! NSRegularExpression(pattern: "&#(?:x([0-9a-f]+)|([0-9]+));", options: [.caseInsensitive])
         let ns = string as NSString
-        let matches = numeric.matches(in: string, options: [], range: NSRange(location: 0, length: ns.length))
+        let matches = MetadataParser.numericEntityRegex.matches(in: string, options: [], range: NSRange(location: 0, length: ns.length))
         if matches.isEmpty { return string }
 
         var result = ""
@@ -446,9 +463,8 @@ final class MetadataParser: ProcessorBase {
 
         if containsSpacedSeparator(curTitle) {
             titleHadHierarchicalSeparators = curTitle.range(of: "\\s[\\\\/>»]\\s", options: .regularExpression) != nil
-            let sepRegex = try! NSRegularExpression(pattern: "\\s[\\|\\-–—\\\\/>»]\\s", options: [.caseInsensitive])
             let ns = origTitle as NSString
-            let matches = sepRegex.matches(in: origTitle, options: [], range: NSRange(location: 0, length: ns.length))
+            let matches = MetadataParser.titleSeparatorRegexCI.matches(in: origTitle, options: [], range: NSRange(location: 0, length: ns.length))
             if let last = matches.last {
                 curTitle = ns.substring(to: last.range.location)
             }
@@ -484,7 +500,7 @@ final class MetadataParser: ProcessorBase {
                     }
                 }
             }
-        } else if curTitle.count > 150 || curTitle.count < 15 {
+        } else if isTextLengthAtLeast(curTitle, 151) || isTextLengthLessThan(curTitle, 15) {
             if let hOnes = try? doc.getElementsByTag("h1"), hOnes.count == 1, let first = hOnes.first() {
                 curTitle = getInnerText(first, regEx: regEx)
             }
@@ -495,8 +511,7 @@ final class MetadataParser: ProcessorBase {
 
         let curTitleWordCount = wordCount(curTitle)
         if curTitleWordCount <= 4 {
-            let sepRegex = try! NSRegularExpression(pattern: "\\s[\\|\\-–—\\\\/>»]\\s", options: [])
-            let origWithoutSeps = sepRegex.stringByReplacingMatches(in: origTitle, options: [], range: NSRange(location: 0, length: origTitle.utf16.count), withTemplate: "")
+            let origWithoutSeps = MetadataParser.titleSeparatorRegex.stringByReplacingMatches(in: origTitle, options: [], range: NSRange(location: 0, length: origTitle.utf16.count), withTemplate: "")
             if !titleHadHierarchicalSeparators || curTitleWordCount != wordCount(origWithoutSeps) - 1 {
                 curTitle = origTitle
             }

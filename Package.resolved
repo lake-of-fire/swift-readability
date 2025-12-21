@@ -1,5 +1,5 @@
 {
-  "originHash" : "f72359a10d6e993018bac8cfbccf28343350dad5833d1ebc9ca0f70394fca85d",
+  "originHash" : "e51553b3c4ef77636408e28a1c944b26c0e5b558aa10def1b207f7caa31360f9",
   "pins" : [
     {
       "identity" : "lrucache",
@@ -34,14 +34,6 @@
       "location" : "https://github.com/apple/swift-testing.git",
       "state" : {
         "revision" : "1d3961a0b006c25bec5301a01f4ba4fbfa7253c6"
-      }
-    },
-    {
-      "identity" : "swiftsoup",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/lake-of-fire/SwiftSoup.git",
-      "state" : {
-        "revision" : "ebaa23fb071f5818706b5c4048a41e535e1de5f2"
       }
     }
   ],

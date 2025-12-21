@@ -37,6 +37,36 @@ final class ArticleGrabber: ProcessorBase {
         "table",
         "ul"
     ]
+    private let blockTagsForTextLength: Set<[UInt8]> = [
+        ReadabilityUTF8Arrays.article,
+        ReadabilityUTF8Arrays.blockquote,
+        ReadabilityUTF8Arrays.dd,
+        ReadabilityUTF8Arrays.dl,
+        ReadabilityUTF8Arrays.div,
+        ReadabilityUTF8Arrays.dt,
+        ReadabilityUTF8Arrays.figure,
+        ReadabilityUTF8Arrays.form,
+        ReadabilityUTF8Arrays.h1,
+        ReadabilityUTF8Arrays.h2,
+        ReadabilityUTF8Arrays.h3,
+        ReadabilityUTF8Arrays.h4,
+        ReadabilityUTF8Arrays.h5,
+        ReadabilityUTF8Arrays.h6,
+        ReadabilityUTF8Arrays.header,
+        ReadabilityUTF8Arrays.li,
+        ReadabilityUTF8Arrays.ol,
+        ReadabilityUTF8Arrays.p,
+        ReadabilityUTF8Arrays.pre,
+        ReadabilityUTF8Arrays.section,
+        ReadabilityUTF8Arrays.table,
+        ReadabilityUTF8Arrays.tbody,
+        ReadabilityUTF8Arrays.td,
+        ReadabilityUTF8Arrays.tfoot,
+        ReadabilityUTF8Arrays.th,
+        ReadabilityUTF8Arrays.thead,
+        ReadabilityUTF8Arrays.tr,
+        ReadabilityUTF8Arrays.ul
+    ]
     private let phrasingElems: Set<[UInt8]> = [
         ReadabilityUTF8Arrays.abbr,
         ReadabilityUTF8Arrays.audio,
@@ -140,6 +170,9 @@ final class ArticleGrabber: ProcessorBase {
     // Dictionaries keyed by Element identity
     private var readabilityObjects: [ObjectIdentifier: ReadabilityObject] = [:]
     private var readabilityDataTable: [ObjectIdentifier: Bool] = [:]
+    private final class LinkDensityCache {
+        var map: [ObjectIdentifier: Double] = [:]
+    }
 
     init(options: ReadabilityOptions, regEx: RegExUtil = RegExUtil()) {
         self.options = options
@@ -149,7 +182,11 @@ final class ArticleGrabber: ProcessorBase {
         self.linkDensityModifier = options.linkDensityModifier
     }
 
-    func grabArticle(doc: Document, metadata: ArticleMetadata, options: ArticleGrabberOptions = ArticleGrabberOptions(), pageElement: Element? = nil) -> Element? {
+    func grabArticle(doc: Document,
+                     metadata: ArticleMetadata,
+                     options: ArticleGrabberOptions = ArticleGrabberOptions(),
+                     pageElement: Element? = nil,
+                     timing: TimingSink? = nil) -> Element? {
         var options = options
         let isPaging = pageElement != nil
         let page = pageElement ?? doc.body()
@@ -163,14 +200,108 @@ final class ArticleGrabber: ProcessorBase {
         outputSettings.prettyPrint(pretty: originalPrettyPrint)
 
         var attempts: [(Element, Int)] = []
+        var textLengthCache: [ObjectIdentifier: Int] = [:]
+        let linkDensityCache = LinkDensityCache()
         while true {
-            let elementsToScore = prepareNodes(doc: doc, metadata: metadata, options: options)
-            let candidates = scoreElements(elementsToScore: elementsToScore, options: options)
-            let (topCandidate, created) = getTopCandidate(page: page, candidates: candidates, options: options)
+            let elementsToScore: [Element]
+            if let timing {
+                elementsToScore = timing.measure("grab.prepareNodes") {
+                    prepareNodes(
+                        doc: doc,
+                        metadata: metadata,
+                        options: options,
+                        timing: timing,
+                        textLengthCache: &textLengthCache,
+                        linkDensityCache: linkDensityCache
+                    )
+                }
+            } else {
+                elementsToScore = prepareNodes(
+                    doc: doc,
+                    metadata: metadata,
+                    options: options,
+                    textLengthCache: &textLengthCache,
+                    linkDensityCache: linkDensityCache
+                )
+            }
 
-            var articleContent = createArticleContent(doc: doc, topCandidate: topCandidate, isPaging: isPaging)
+            let candidates: [Element]
+            if let timing {
+                candidates = timing.measure("grab.scoreElements") {
+                    scoreElements(
+                        elementsToScore: elementsToScore,
+                        options: options,
+                        timing: timing,
+                        textLengthCache: &textLengthCache
+                    )
+                }
+            } else {
+                candidates = scoreElements(
+                    elementsToScore: elementsToScore,
+                    options: options,
+                    textLengthCache: &textLengthCache
+                )
+            }
 
-            prepArticle(articleContent: articleContent, options: options, metadata: metadata)
+            let (topCandidate, created): (Element, Bool)
+            if let timing {
+                (topCandidate, created) = timing.measure("grab.getTopCandidate") {
+                    getTopCandidate(
+                        page: page,
+                        candidates: candidates,
+                        options: options,
+                        timing: timing,
+                        textLengthCache: &textLengthCache,
+                        linkDensityCache: linkDensityCache
+                    )
+                }
+            } else {
+                (topCandidate, created) = getTopCandidate(
+                    page: page,
+                    candidates: candidates,
+                    options: options,
+                    textLengthCache: &textLengthCache,
+                    linkDensityCache: linkDensityCache
+                )
+            }
+
+            let articleContent: Element
+            if let timing {
+                articleContent = timing.measure("grab.createArticleContent") {
+                    createArticleContent(
+                        doc: doc,
+                        topCandidate: topCandidate,
+                        isPaging: isPaging,
+                        linkDensityCache: linkDensityCache
+                    )
+                }
+            } else {
+                articleContent = createArticleContent(
+                    doc: doc,
+                    topCandidate: topCandidate,
+                    isPaging: isPaging,
+                    linkDensityCache: linkDensityCache
+                )
+            }
+
+            if let timing {
+                _ = timing.measure("grab.prepArticle") {
+                    prepArticle(
+                        articleContent: articleContent,
+                        options: options,
+                        metadata: metadata,
+                        timing: timing,
+                        linkDensityCache: linkDensityCache
+                    )
+                }
+            } else {
+                prepArticle(
+                    articleContent: articleContent,
+                    options: options,
+                    metadata: metadata,
+                        linkDensityCache: linkDensityCache
+                )
+            }
 
             if created {
                 try? topCandidate.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityPage1)
@@ -214,13 +345,24 @@ final class ArticleGrabber: ProcessorBase {
                 }
             }
 
-            getTextDirection(topCandidate: topCandidate, doc: doc)
+            if let timing {
+                _ = timing.measure("grab.getTextDirection") {
+                    getTextDirection(topCandidate: topCandidate, doc: doc)
+                }
+            } else {
+                getTextDirection(topCandidate: topCandidate, doc: doc)
+            }
             return articleContent
         }
     }
 
     // MARK: First step: prepare nodes
-    private func prepareNodes(doc: Document, metadata: ArticleMetadata, options: ArticleGrabberOptions) -> [Element] {
+    private func prepareNodes(doc: Document,
+                              metadata: ArticleMetadata,
+                              options: ArticleGrabberOptions,
+                              timing: TimingSink? = nil,
+                              textLengthCache: inout [ObjectIdentifier: Int],
+                              linkDensityCache: LinkDensityCache) -> [Element] {
         var elementsToScore: [Element] = []
         var node: Element? = doc.body()
         var shouldRemoveTitleHeader = true
@@ -230,7 +372,10 @@ final class ArticleGrabber: ProcessorBase {
             let currentTagName = current.tagNameUTF8()
             let matchString = current.classNameSafe() + " " + current.idSafe()
 
-            if !isProbablyVisible(current) {
+            let isVisible = timing?.measure("grab.prepareNodes.visibility") {
+                isProbablyVisible(current)
+            } ?? isProbablyVisible(current)
+            if !isVisible {
                 node = removeAndGetNext(node: current, reason: "hidden")
                 continue
             }
@@ -238,44 +383,65 @@ final class ArticleGrabber: ProcessorBase {
             // aria-modal + role=dialog content isn't visible to the user.
             let ariaModal = current.attrOrEmptyUTF8(ReadabilityUTF8Arrays.ariaModal)
             let role = current.attrOrEmptyUTF8(ReadabilityUTF8Arrays.role)
-            let roleString = String(decoding: role, as: UTF8.self)
             if ariaModal.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.true_),
                role.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.dialog) {
                 node = removeAndGetNext(node: current, reason: "aria-modal dialog")
                 continue
             }
 
-            if checkByline(node: current, matchString: matchString, metadata: metadata) {
+            let isByline = timing?.measure("grab.prepareNodes.byline") {
+                checkByline(node: current, matchString: matchString, metadata: metadata)
+            } ?? checkByline(node: current, matchString: matchString, metadata: metadata)
+            if isByline {
                 node = removeAndGetNext(node: current, reason: "byline")
                 continue
             }
 
-            if shouldRemoveTitleHeader,
-               !articleTitle.isEmpty,
-               headerDuplicatesTitle(node: current, articleTitle: articleTitle) {
+            let headerDup = timing?.measure("grab.prepareNodes.headerDup") {
+                shouldRemoveTitleHeader &&
+                !articleTitle.isEmpty &&
+                headerDuplicatesTitle(node: current, articleTitle: articleTitle)
+            } ?? (shouldRemoveTitleHeader &&
+                  !articleTitle.isEmpty &&
+                  headerDuplicatesTitle(node: current, articleTitle: articleTitle))
+            if headerDup {
                 shouldRemoveTitleHeader = false
                 node = removeAndGetNext(node: current, reason: "header duplicates title")
                 continue
             }
 
             if options.stripUnlikelyCandidates {
-                if regEx.isUnlikelyCandidate(matchString),
-                   !regEx.okMaybeItsACandidate(matchString),
-                   !hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.table),
-                   !hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.code),
-                   currentTagName != ReadabilityUTF8Arrays.body,
-                   currentTagName != ReadabilityUTF8Arrays.a {
+                let isUnlikely = timing?.measure("grab.prepareNodes.unlikely") {
+                    guard currentTagName != ReadabilityUTF8Arrays.body,
+                          currentTagName != ReadabilityUTF8Arrays.a else { return false }
+                    if !regEx.isUnlikelyCandidate(matchString) { return false }
+                    if regEx.okMaybeItsACandidate(matchString) { return false }
+                    if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.table) { return false }
+                    if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.code) { return false }
+                    return true
+                } ?? {
+                    guard currentTagName != ReadabilityUTF8Arrays.body,
+                          currentTagName != ReadabilityUTF8Arrays.a else { return false }
+                    if !regEx.isUnlikelyCandidate(matchString) { return false }
+                    if regEx.okMaybeItsACandidate(matchString) { return false }
+                    if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.table) { return false }
+                    if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.code) { return false }
+                    return true
+                }()
+                if isUnlikely {
                     node = removeAndGetNext(node: current, reason: "Removing unlikely candidate")
                     continue
                 }
 
                 if unlikelyRoles.contains(where: { role.equalsIgnoreCaseASCII($0) }) {
+                    let roleString = String(decoding: role, as: UTF8.self)
                     node = removeAndGetNext(node: current, reason: "unlikely role " + roleString)
                     continue
                 }
             }
 
-            if (currentTagName == ReadabilityUTF8Arrays.div ||
+            let noContent = timing?.measure("grab.prepareNodes.noContent") {
+                (currentTagName == ReadabilityUTF8Arrays.div ||
                 currentTagName == ReadabilityUTF8Arrays.section ||
                 currentTagName == ReadabilityUTF8Arrays.header ||
                 currentTagName == ReadabilityUTF8Arrays.h1 ||
@@ -283,8 +449,19 @@ final class ArticleGrabber: ProcessorBase {
                 currentTagName == ReadabilityUTF8Arrays.h3 ||
                 currentTagName == ReadabilityUTF8Arrays.h4 ||
                 currentTagName == ReadabilityUTF8Arrays.h5 ||
-                currentTagName == ReadabilityUTF8Arrays.h6),
-               isElementWithoutContent(node: current) {
+                currentTagName == ReadabilityUTF8Arrays.h6) &&
+                isElementWithoutContent(node: current)
+            } ?? ((currentTagName == ReadabilityUTF8Arrays.div ||
+                    currentTagName == ReadabilityUTF8Arrays.section ||
+                    currentTagName == ReadabilityUTF8Arrays.header ||
+                    currentTagName == ReadabilityUTF8Arrays.h1 ||
+                    currentTagName == ReadabilityUTF8Arrays.h2 ||
+                    currentTagName == ReadabilityUTF8Arrays.h3 ||
+                    currentTagName == ReadabilityUTF8Arrays.h4 ||
+                    currentTagName == ReadabilityUTF8Arrays.h5 ||
+                    currentTagName == ReadabilityUTF8Arrays.h6) &&
+                    isElementWithoutContent(node: current))
+            if noContent {
                 node = removeAndGetNext(node: current, reason: "node without content")
                 continue
             }
@@ -294,11 +471,30 @@ final class ArticleGrabber: ProcessorBase {
             }
 
             if currentTagName == ReadabilityUTF8Arrays.div {
-                putPhrasingContentIntoParagraphs(div: current)
+                if let timing {
+                    _ = timing.measure("grab.prepareNodes.phrasing") {
+                        putPhrasingContentIntoParagraphs(div: current)
+                    }
+                } else {
+                    putPhrasingContentIntoParagraphs(div: current)
+                }
 
-                if hasSinglePInsideElement(element: current) {
-                    let currentTextLength = getInnerText(current, regEx: regEx).count
-                    if getLinkDensity(element: current, textLength: currentTextLength) < 0.25, let newNode = try? current.child(0) {
+                let hasSingleP = timing?.measure("grab.prepareNodes.hasSingleP") {
+                    hasSinglePInsideElement(element: current)
+                } ?? hasSinglePInsideElement(element: current)
+                if hasSingleP {
+                    let currentTextLength = textLength(
+                        of: current,
+                        normalizeSpaces: true,
+                        cache: &textLengthCache
+                    )
+                    let linkDensity = getLinkDensity(
+                        element: current,
+                        textLength: currentTextLength,
+                        timing: timing,
+                        cache: linkDensityCache
+                    )
+                    if linkDensity < 0.25, let newNode = try? current.child(0) {
                         try? current.replaceWith(newNode)
                         elementsToScore.append(newNode)
                         node = getNextNode(node: newNode)
@@ -446,9 +642,11 @@ final class ArticleGrabber: ProcessorBase {
     private func isValidByline(node: Element, matchString: String) -> Bool {
         let rel = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.rel), as: UTF8.self)
         let itemprop = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.itemprop), as: UTF8.self)
-        let bylineLength = textContentPreservingWhitespace(of: node)
+        let bylineText = textContentPreservingWhitespace(of: node)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .count
+        let bylineUtf8Length = bylineText.utf8.count
+        if bylineUtf8Length == 0 { return false }
+        let bylineLength = bylineUtf8Length < 100 ? bylineUtf8Length : bylineText.count
 
         return (
             rel == "author" ||
@@ -507,24 +705,45 @@ final class ArticleGrabber: ProcessorBase {
             return text.getWholeText()
         }
         if let element = node as? Element {
-            return element.getChildNodes().map(textContentPreservingWhitespace(of:)).joined()
+            return collectTextPreservingWhitespace(from: element)
         }
         return ""
     }
 
+    private func collectTextPreservingWhitespace(from element: Element) -> String {
+        var output: [String] = []
+        output.reserveCapacity(8)
+        var stack = Array(element.getChildNodes().reversed())
+        while let node = stack.popLast() {
+            if let text = node as? TextNode {
+                output.append(text.getWholeText())
+            } else if let data = node as? DataNode {
+                output.append(data.getWholeData())
+            } else if let el = node as? Element {
+                let children = el.getChildNodes()
+                if !children.isEmpty {
+                    stack.append(contentsOf: children.reversed())
+                }
+            }
+        }
+        if output.isEmpty { return "" }
+        return output.joined()
+    }
+
     private func isElementWithoutContent(node: Element) -> Bool {
-        let textValue = (try? node.text()) ?? ""
-        let textBlank = textValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let textBlank = !hasNonWhitespaceText(node)
+        if !textBlank { return false }
         let childCount = node.children().count
+        if childCount == 0 { return true }
         let brHr = ((try? node.getElementsByTag("br").count) ?? 0) + ((try? node.getElementsByTag("hr").count) ?? 0)
-        return textBlank && (childCount == 0 || childCount == brHr)
+        return childCount == brHr
     }
 
     private func hasSinglePInsideElement(element: Element) -> Bool {
         if element.children().count != 1 { return false }
         guard let child = try? element.child(0), child.tagNameUTF8() == ReadabilityUTF8Arrays.p else { return false }
         for node in element.getChildNodes() {
-            if let text = node as? TextNode, regEx.hasContent(text.text()) {
+            if let text = node as? TextNode, regEx.hasContent(text.getWholeText()) {
                 return false
             }
         }
@@ -545,20 +764,38 @@ final class ArticleGrabber: ProcessorBase {
     }
 
     // MARK: Second step: score elements
-    private func scoreElements(elementsToScore: [Element], options: ArticleGrabberOptions) -> [Element] {
+    private func scoreElements(elementsToScore: [Element],
+                               options: ArticleGrabberOptions,
+                               timing: TimingSink? = nil,
+                               textLengthCache: inout [ObjectIdentifier: Int]) -> [Element] {
         var candidates: [Element] = []
         for element in elementsToScore {
             if element.parent() == nil { continue }
-            let innerText = getInnerText(element, regEx: regEx)
+            let innerText = timing?.measure("grab.scoreElements.innerText") {
+                getInnerText(element, regEx: regEx)
+            } ?? getInnerText(element, regEx: regEx)
+            let key = ObjectIdentifier(element)
+            if textLengthCache[key] == nil {
+                textLengthCache[key] = innerText.count
+            }
             if isTextLengthLessThan(innerText, 25) { continue }
-            let ancestors = getNodeAncestors(node: element, maxDepth: 5)
+            let ancestors = timing?.measure("grab.scoreElements.ancestors") {
+                getNodeAncestors(node: element, maxDepth: 5)
+            } ?? getNodeAncestors(node: element, maxDepth: 5)
             if ancestors.isEmpty { continue }
 
             var contentScore = 1.0
-            let commasRange = NSRange(location: 0, length: innerText.utf16.count)
-            let commasCount = commasPattern.numberOfMatches(in: innerText, options: [], range: commasRange)
+            let commasCount = timing?.measure("grab.scoreElements.commas") {
+                let commasRange = NSRange(location: 0, length: innerText.utf16.count)
+                return commasPattern.numberOfMatches(in: innerText, options: [], range: commasRange)
+            } ?? {
+                let commasRange = NSRange(location: 0, length: innerText.utf16.count)
+                return commasPattern.numberOfMatches(in: innerText, options: [], range: commasRange)
+            }()
             contentScore += Double(commasCount + 1)
-            contentScore += min(floor(Double(innerText.count) / 100.0), 3.0)
+            if innerText.utf8.count >= 100 {
+                contentScore += min(floor(Double(innerText.count) / 100.0), 3.0)
+            }
 
             for (level, ancestor) in ancestors.enumerated() {
                 if ancestor.tagNameUTF8().isEmpty { continue }
@@ -639,14 +876,88 @@ final class ArticleGrabber: ProcessorBase {
         return ancestors
     }
 
+    private func textLength(of element: Element,
+                            normalizeSpaces: Bool,
+                            cache: inout [ObjectIdentifier: Int]) -> Int {
+        let key = ObjectIdentifier(element)
+        if let cached = cache[key] { return cached }
+        let length: Int
+        if normalizeSpaces {
+            length = normalizedTextLength(of: element)
+        } else {
+            length = getInnerText(element, regEx: regEx, normalizeSpaces: normalizeSpaces).count
+        }
+        cache[key] = length
+        return length
+    }
+
+    private func normalizedTextLength(of element: Element) -> Int {
+        var length = 0
+        var lastWasWhitespace = true
+        var stack = Array(element.getChildNodes().reversed())
+
+        while let node = stack.popLast() {
+            if let text = node as? TextNode {
+                accumulateNormalizedLength(from: text.getWholeText(),
+                                           length: &length,
+                                           lastWasWhitespace: &lastWasWhitespace)
+            } else if let data = node as? DataNode {
+                accumulateNormalizedLength(from: data.getWholeData(),
+                                           length: &length,
+                                           lastWasWhitespace: &lastWasWhitespace)
+            } else if let el = node as? Element {
+                let tagName = el.tagNameUTF8()
+                if tagName == ReadabilityUTF8Arrays.br ||
+                    tagName == ReadabilityUTF8Arrays.hr ||
+                    blockTagsForTextLength.contains(tagName) {
+                    lastWasWhitespace = true
+                }
+
+                let children = el.getChildNodes()
+                if !children.isEmpty {
+                    stack.append(contentsOf: children.reversed())
+                }
+            }
+        }
+        return length
+    }
+
+    private func accumulateNormalizedLength(from text: String,
+                                            length: inout Int,
+                                            lastWasWhitespace: inout Bool) {
+        for scalar in text.unicodeScalars {
+            if scalar.properties.isWhitespace {
+                lastWasWhitespace = true
+                continue
+            }
+            if lastWasWhitespace && length > 0 {
+                length += 1
+            }
+            length += 1
+            lastWasWhitespace = false
+        }
+    }
+
     // MARK: Third step: top candidate
-    private func getTopCandidate(page: Element, candidates: [Element], options: ArticleGrabberOptions) -> (Element, Bool) {
+    private func getTopCandidate(page: Element,
+                                 candidates: [Element],
+                                 options: ArticleGrabberOptions,
+                                 timing: TimingSink? = nil,
+                                 textLengthCache: inout [ObjectIdentifier: Int],
+                                 linkDensityCache: LinkDensityCache) -> (Element, Bool) {
         var topCandidates: [Element] = []
 
         for candidate in candidates {
             guard let readability = getReadabilityObject(element: candidate) else { continue }
-            let candidateTextLength = getInnerText(candidate, regEx: regEx).count
-            let candidateScore = readability.contentScore * (1 - getLinkDensity(element: candidate, textLength: candidateTextLength))
+            let candidateTextLength = timing?.measure("grab.getTopCandidate.innerText") {
+                textLength(of: candidate, normalizeSpaces: true, cache: &textLengthCache)
+            } ?? textLength(of: candidate, normalizeSpaces: true, cache: &textLengthCache)
+            let candidateScore = readability.contentScore * (1 - getLinkDensity(
+                element: candidate,
+                textLength: candidateTextLength,
+                timing: timing,
+                cache: linkDensityCache
+            ))
             readability.contentScore = candidateScore
 
             for t in 0..<nbTopCandidates {
@@ -676,10 +987,21 @@ final class ArticleGrabber: ProcessorBase {
             var parentOfTop = topCandidate!.parent()
             var alternativeAncestors: [[Element]] = []
             if let topScore = getReadabilityObject(element: topCandidate!)?.contentScore {
-                for other in topCandidates where other != topCandidate! {
-                    if let otherScore = getReadabilityObject(element: other)?.contentScore,
-                       otherScore / topScore >= 0.75 {
-                        alternativeAncestors.append(getNodeAncestors(node: other))
+                if let timing {
+                    _ = timing.measure("grab.getTopCandidate.altAncestors") {
+                        for other in topCandidates where other != topCandidate! {
+                            if let otherScore = getReadabilityObject(element: other)?.contentScore,
+                               otherScore / topScore >= 0.75 {
+                                alternativeAncestors.append(getNodeAncestors(node: other))
+                            }
+                        }
+                    }
+                } else {
+                    for other in topCandidates where other != topCandidate! {
+                        if let otherScore = getReadabilityObject(element: other)?.contentScore,
+                           otherScore / topScore >= 0.75 {
+                            alternativeAncestors.append(getNodeAncestors(node: other))
+                        }
                     }
                 }
             }
@@ -736,25 +1058,54 @@ final class ArticleGrabber: ProcessorBase {
         }
     }
 
-    private func getLinkDensity(element: Element, textLength: Int? = nil) -> Double {
+    private func getLinkDensity(element: Element,
+                                textLength: Int? = nil,
+                                timing: TimingSink? = nil,
+                                cache: LinkDensityCache) -> Double {
         let textLength = textLength ?? getInnerText(element, regEx: regEx).count
         if textLength == 0 { return 0.0 }
+        let key = ObjectIdentifier(element)
+        if let cached = cache.map[key] { return cached }
         var linkLength = 0.0
-        if let links = try? element.select("a") {
+        let links: Elements?
+        if let timing {
+            links = timing.measure("grab.getLinkDensity.select") {
+                try? element.select("a")
+            }
+        } else {
+            links = try? element.select("a")
+        }
+        if let links {
+            var textCache: [ObjectIdentifier: Int] = [:]
+            textCache.reserveCapacity(links.count)
             for link in links {
                 let href = link.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href)
                 // Match Readability.js REGEXPS.hashUrl: /^#.+/ (exclude bare "#").
                 let coefficient: Double = (href.count > 1 && href.first == ReadabilityUTF8Arrays.hash.first) ? 0.3 : 1.0
-                let linkTextLength = getInnerText(link, regEx: regEx).count
+                let identifier = ObjectIdentifier(link)
+                let linkTextLength: Int
+                if let cached = textCache[identifier] {
+                    linkTextLength = cached
+                } else {
+                    linkTextLength = timing?.measure("grab.getLinkDensity.innerText") {
+                        getInnerText(link, regEx: regEx).count
+                    } ?? getInnerText(link, regEx: regEx).count
+                    textCache[identifier] = linkTextLength
+                }
                 if linkTextLength == 0 { continue }
                 linkLength += Double(linkTextLength) * coefficient
             }
         }
-        return linkLength / Double(textLength)
+        let density = linkLength / Double(textLength)
+        cache.map[key] = density
+        return density
     }
 
     // MARK: Fourth step: create article content
-    private func createArticleContent(doc: Document, topCandidate: Element, isPaging: Bool) -> Element {
+    private func createArticleContent(doc: Document,
+                                      topCandidate: Element,
+                                      isPaging: Bool,
+                                      linkDensityCache: LinkDensityCache) -> Element {
         let articleContent = (try? doc.createElement("div")) ?? Element(try! Tag.valueOf("div"), "")
         if isPaging {
             try? articleContent.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityContent)
@@ -780,8 +1131,12 @@ final class ArticleGrabber: ProcessorBase {
                     append = true
                 } else if shouldKeepSibling(sibling: sibling) {
                     let nodeContent = getInnerText(sibling, regEx: regEx)
-                    let nodeLength = nodeContent.count
-                    let linkDensity = getLinkDensity(element: sibling, textLength: nodeLength)
+                    let nodeLength = nodeContent.utf8.count < 81 ? nodeContent.utf8.count : nodeContent.count
+                    let linkDensity = getLinkDensity(
+                        element: sibling,
+                        textLength: nodeLength,
+                        cache: linkDensityCache
+                    )
                     if nodeLength > 80 && linkDensity < 0.25 {
                         append = true
                     } else if nodeLength < 80 && nodeLength > 0 && linkDensity == 0.0 &&
@@ -806,18 +1161,38 @@ final class ArticleGrabber: ProcessorBase {
     }
 
     // MARK: Fifth step: prep article
-    private func prepArticle(articleContent: Element, options: ArticleGrabberOptions, metadata: ArticleMetadata) {
-        cleanStyles(e: articleContent)
-        markDataTables(root: articleContent)
-        fixLazyImages(root: articleContent)
+    private func prepArticle(articleContent: Element,
+                             options: ArticleGrabberOptions,
+                             metadata: ArticleMetadata,
+                             timing: TimingSink? = nil,
+                             linkDensityCache: LinkDensityCache) {
+        if let timing {
+            _ = timing.measure("grab.cleanStyles") { cleanStyles(e: articleContent) }
+            _ = timing.measure("grab.markDataTables") { markDataTables(root: articleContent) }
+            _ = timing.measure("grab.fixLazyImages") { fixLazyImages(root: articleContent) }
+        } else {
+            cleanStyles(e: articleContent)
+            markDataTables(root: articleContent)
+            fixLazyImages(root: articleContent)
+        }
 
-        cleanConditionally(e: articleContent, tag: "form", options: options)
-        cleanConditionally(e: articleContent, tag: "fieldset", options: options)
-        clean(e: articleContent, tag: "object")
-        clean(e: articleContent, tag: "embed")
-        clean(e: articleContent, tag: "footer")
-        clean(e: articleContent, tag: "link")
-        clean(e: articleContent, tag: "aside")
+        if let timing {
+            _ = timing.measure("grab.cleanConditionally.form") { cleanConditionally(e: articleContent, tag: "form", options: options, timing: timing, linkDensityCache: linkDensityCache) }
+            _ = timing.measure("grab.cleanConditionally.fieldset") { cleanConditionally(e: articleContent, tag: "fieldset", options: options, timing: timing, linkDensityCache: linkDensityCache) }
+            _ = timing.measure("grab.clean.object") { clean(e: articleContent, tag: "object") }
+            _ = timing.measure("grab.clean.embed") { clean(e: articleContent, tag: "embed") }
+            _ = timing.measure("grab.clean.footer") { clean(e: articleContent, tag: "footer") }
+            _ = timing.measure("grab.clean.link") { clean(e: articleContent, tag: "link") }
+            _ = timing.measure("grab.clean.aside") { clean(e: articleContent, tag: "aside") }
+        } else {
+            cleanConditionally(e: articleContent, tag: "form", options: options, linkDensityCache: linkDensityCache)
+            cleanConditionally(e: articleContent, tag: "fieldset", options: options, linkDensityCache: linkDensityCache)
+            clean(e: articleContent, tag: "object")
+            clean(e: articleContent, tag: "embed")
+            clean(e: articleContent, tag: "footer")
+            clean(e: articleContent, tag: "link")
+            clean(e: articleContent, tag: "aside")
+        }
 
         let shareRegex = try! NSRegularExpression(pattern: "(\\b|_)(share|sharedaddy)(\\b|_)", options: [.caseInsensitive])
         let shareElementThreshold = ReadabilityOptions.defaultCharThreshold
@@ -827,20 +1202,32 @@ final class ArticleGrabber: ProcessorBase {
                 if shareRegex.firstMatch(in: matchString, options: [], range: range) == nil {
                     return false
                 }
-                return self.textContentPreservingWhitespace(of: node).count < shareElementThreshold
+                let text = self.textContentPreservingWhitespace(of: node)
+                return self.isTextLengthLessThan(text, shareElementThreshold)
             }
         }
 
-        clean(e: articleContent, tag: "iframe")
-        clean(e: articleContent, tag: "input")
-        clean(e: articleContent, tag: "textarea")
-        clean(e: articleContent, tag: "select")
-        clean(e: articleContent, tag: "button")
-        cleanHeaders(e: articleContent, options: options)
-
-        cleanConditionally(e: articleContent, tag: "table", options: options)
-        cleanConditionally(e: articleContent, tag: "ul", options: options)
-        cleanConditionally(e: articleContent, tag: "div", options: options)
+        if let timing {
+            _ = timing.measure("grab.clean.iframe") { clean(e: articleContent, tag: "iframe") }
+            _ = timing.measure("grab.clean.input") { clean(e: articleContent, tag: "input") }
+            _ = timing.measure("grab.clean.textarea") { clean(e: articleContent, tag: "textarea") }
+            _ = timing.measure("grab.clean.select") { clean(e: articleContent, tag: "select") }
+            _ = timing.measure("grab.clean.button") { clean(e: articleContent, tag: "button") }
+            _ = timing.measure("grab.cleanHeaders") { cleanHeaders(e: articleContent, options: options) }
+            _ = timing.measure("grab.cleanConditionally.table") { cleanConditionally(e: articleContent, tag: "table", options: options, timing: timing, linkDensityCache: linkDensityCache) }
+            _ = timing.measure("grab.cleanConditionally.ul") { cleanConditionally(e: articleContent, tag: "ul", options: options, timing: timing, linkDensityCache: linkDensityCache) }
+            _ = timing.measure("grab.cleanConditionally.div") { cleanConditionally(e: articleContent, tag: "div", options: options, timing: timing, linkDensityCache: linkDensityCache) }
+        } else {
+            clean(e: articleContent, tag: "iframe")
+            clean(e: articleContent, tag: "input")
+            clean(e: articleContent, tag: "textarea")
+            clean(e: articleContent, tag: "select")
+            clean(e: articleContent, tag: "button")
+            cleanHeaders(e: articleContent, options: options)
+            cleanConditionally(e: articleContent, tag: "table", options: options, linkDensityCache: linkDensityCache)
+            cleanConditionally(e: articleContent, tag: "ul", options: options, linkDensityCache: linkDensityCache)
+            cleanConditionally(e: articleContent, tag: "div", options: options, linkDensityCache: linkDensityCache)
+        }
 
         // Replace H1 with H2 as H1 should be only title that is displayed separately.
         if let h1s = try? articleContent.getElementsByTag("h1") {
@@ -855,7 +1242,8 @@ final class ArticleGrabber: ProcessorBase {
             let objectCount = (try? paragraph.getElementsByTag("object").count) ?? 0
             let iframeCount = (try? paragraph.getElementsByTag("iframe").count) ?? 0
             let total = imgCount + embedCount + objectCount + iframeCount
-            return total == 0 && self.getInnerText(paragraph, normalizeSpaces: false).count == 0
+            if total != 0 { return false }
+            return !self.hasNonWhitespaceText(paragraph)
         }
 
         if let brs = try? articleContent.select("br") {
@@ -1068,25 +1456,49 @@ final class ArticleGrabber: ProcessorBase {
         return (rows, columns)
     }
 
-    private func getTextDensity(_ element: Element, tags: [String], textLength: Int? = nil) -> Double {
+    private func getTextDensity(_ element: Element, tags: [String], textLength: Int? = nil, timing: TimingSink? = nil) -> Double {
         let textLength = textLength ?? getInnerText(element, regEx: regEx, normalizeSpaces: true).count
         if textLength == 0 { return 0 }
 
         let selector = tags
             .map { $0.lowercased() }
             .joined(separator: ",")
-        guard !selector.isEmpty, let children = try? element.select(selector) else { return 0 }
+        let children: Elements?
+        if let timing {
+            children = timing.measure("grab.getTextDensity.select") {
+                try? element.select(selector)
+            }
+        } else {
+            children = try? element.select(selector)
+        }
+        guard !selector.isEmpty, let children else { return 0 }
 
         var childrenLength = 0
+        var textCache: [ObjectIdentifier: Int] = [:]
+        textCache.reserveCapacity(children.count)
         for child in children {
             // SwiftSoup may include the root element itself in `select` results; Readability.js only counts descendants.
             if child === element { continue }
-            childrenLength += getInnerText(child, regEx: regEx, normalizeSpaces: true).count
+            let identifier = ObjectIdentifier(child)
+            let childLength: Int
+            if let cached = textCache[identifier] {
+                childLength = cached
+            } else {
+                childLength = timing?.measure("grab.getTextDensity.innerText") {
+                    getInnerText(child, regEx: regEx, normalizeSpaces: true).count
+                } ?? getInnerText(child, regEx: regEx, normalizeSpaces: true).count
+                textCache[identifier] = childLength
+            }
+            childrenLength += childLength
         }
         return Double(childrenLength) / Double(textLength)
     }
 
-    private func cleanConditionally(e: Element, tag: String, options: ArticleGrabberOptions) {
+    private func cleanConditionally(e: Element,
+                                    tag: String,
+                                    options: ArticleGrabberOptions,
+                                    timing: TimingSink? = nil,
+                                    linkDensityCache: LinkDensityCache) {
         if options.cleanConditionally == false { return }
         let initialIsList = tag == "ul" || tag == "ol"
 
@@ -1095,11 +1507,22 @@ final class ArticleGrabber: ProcessorBase {
                 self.getReadabilityDataTable(element: element)
             }
             var isList = initialIsList
-            let innerText = self.getInnerText(node, regEx: self.regEx)
+            let innerText = timing?.measure("grab.cleanConditionally.innerText") {
+                self.getInnerText(node, regEx: self.regEx)
+            } ?? self.getInnerText(node, regEx: self.regEx)
+            let innerTextLength = innerText.count
             var nodeLength = 0
             if !isList {
-                nodeLength = innerText.count
-                if nodeLength > 0, let listNodes = try? node.select("ul, ol") {
+                nodeLength = innerTextLength
+                let listNodes: Elements?
+                if let timing {
+                    listNodes = timing.measure("grab.cleanConditionally.listSelect") {
+                        try? node.select("ul, ol")
+                    }
+                } else {
+                    listNodes = try? node.select("ul, ol")
+                }
+                if nodeLength > 0, let listNodes {
                     var listLength = 0
                     for list in listNodes {
                         listLength += self.getInnerText(list, regEx: self.regEx).count
@@ -1128,14 +1551,27 @@ final class ArticleGrabber: ProcessorBase {
             let weight = self.getClassWeight(e: node, options: options)
             if weight < 0 { return true }
 
-            if self.getCharCount(text: innerText, c: ",") < 10 {
+            if self.countOccurrences(innerText, ascii: self.asciiComma, max: 10) < 10 {
                 let p = (try? node.select("p").count) ?? 0
                 let img = (try? node.select("img").count) ?? 0
                 let li = ((try? node.select("li").count) ?? 0) - 100
                 let input = (try? node.select("input").count) ?? 0
-                let headingDensity = self.getTextDensity(node, tags: ["h1", "h2", "h3", "h4", "h5", "h6"], textLength: innerText.count)
+                let headingDensity = self.getTextDensity(
+                    node,
+                    tags: ["h1", "h2", "h3", "h4", "h5", "h6"],
+                    textLength: innerTextLength,
+                    timing: timing
+                )
                 var embedCount = 0
-                if let embeds = try? node.select("object, embed, iframe") {
+                let embeds: Elements?
+                if let timing {
+                    embeds = timing.measure("grab.cleanConditionally.embedsSelect") {
+                        try? node.select("object, embed, iframe")
+                    }
+                } else {
+                    embeds = try? node.select("object, embed, iframe")
+                }
+                if let embeds {
                     for embed in embeds {
                         if let attrs = embed.getAttributes()?.asList() {
                             for attr in attrs {
@@ -1151,16 +1587,21 @@ final class ArticleGrabber: ProcessorBase {
                         embedCount += 1
                     }
                 }
-                let linkDensity = self.getLinkDensity(element: node, textLength: innerText.count)
+                let linkDensity = self.getLinkDensity(
+                    element: node,
+                    textLength: innerTextLength,
+                    timing: timing,
+                    cache: linkDensityCache
+                )
                 let innerTextRange = NSRange(location: 0, length: innerText.utf16.count)
                 if self.adWordsPattern.firstMatch(in: innerText, options: [], range: innerTextRange) != nil ||
                    self.loadingWordsPattern.firstMatch(in: innerText, options: [], range: innerTextRange) != nil {
                     return true
                 }
 
-                let contentLength = innerText.count
+                let contentLength = innerTextLength
                 let textishTags = Set(["span", "li", "td"]).union(self.divToPElemsStrings)
-                let textDensity = self.getTextDensity(node, tags: Array(textishTags), textLength: innerText.count)
+                let textDensity = self.getTextDensity(node, tags: Array(textishTags), textLength: innerTextLength, timing: timing)
                 let isFigureChild = self.hasAncestorTag(node: node, tagName: ReadabilityUTF8Arrays.figure)
                 let linkDensityModifier = self.linkDensityModifier
 
@@ -1222,7 +1663,24 @@ final class ArticleGrabber: ProcessorBase {
     }
 
     private func getCharCount(text: String, c: Character = ",") -> Int {
+        if let ascii = c.asciiValue {
+            return countOccurrences(text, ascii: ascii, max: nil)
+        }
         return text.split(separator: c).count - 1
+    }
+
+    private let asciiComma: UInt8 = 44
+
+    private func countOccurrences(_ text: String, ascii: UInt8, max: Int?) -> Int {
+        var count = 0
+        if let max, max <= 0 { return 0 }
+        for byte in text.utf8 {
+            if byte == ascii {
+                count += 1
+                if let max, count >= max { return count }
+            }
+        }
+        return count
     }
 
     private func clean(e: Element, tag: String) {
