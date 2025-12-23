@@ -23,7 +23,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(path: "../SwiftSoup"),
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.11.3"),
         // Pin to a Swift 6.2-compatible revision (SwiftSyntax 603.x).
         .package(url: "https://github.com/apple/swift-testing.git", revision: "1d3961a0b006c25bec5301a01f4ba4fbfa7253c6")
     ],

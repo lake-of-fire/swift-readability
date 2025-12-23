@@ -1064,8 +1064,6 @@ final class ArticleGrabber: ProcessorBase {
                                 cache: LinkDensityCache) -> Double {
         let textLength = textLength ?? getInnerText(element, regEx: regEx).count
         if textLength == 0 { return 0.0 }
-        let key = ObjectIdentifier(element)
-        if let cached = cache.map[key] { return cached }
         var linkLength = 0.0
         let links: Elements?
         if let timing {
@@ -1097,7 +1095,6 @@ final class ArticleGrabber: ProcessorBase {
             }
         }
         let density = linkLength / Double(textLength)
-        cache.map[key] = density
         return density
     }
 
@@ -1230,7 +1227,7 @@ final class ArticleGrabber: ProcessorBase {
         }
 
         // Replace H1 with H2 as H1 should be only title that is displayed separately.
-        if let h1s = try? articleContent.getElementsByTag("h1") {
+        if let h1s = try? articleContent.select("h1") {
             for h1 in h1s {
                 try? h1.tagName("h2")
             }

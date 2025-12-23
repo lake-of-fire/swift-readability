@@ -465,12 +465,21 @@ private extension Readability {
             sourceHTML = ""
         }
         let explicitBooleanAttrs = effectiveUseXMLSerializer ? explicitBooleanAttributes(in: sourceHTML) : []
-        if effectiveUseXMLSerializer, !isLiveDocument {
+        let needsSerializationDoc = articleContent.ownerDocument() == nil
+        if effectiveUseXMLSerializer, !isLiveDocument || needsSerializationDoc {
             normalizeBooleanAttributes(in: articleContent, sourceHTML: sourceHTML, explicitBooleanAttrs: explicitBooleanAttrs)
             let serializationDoc = try! SwiftSoup.parse("", url.absoluteString, Parser.xmlParser())
             let outputSettings = serializationDoc.outputSettings()
             outputSettings.prettyPrint(pretty: false)
             outputSettings.syntax(syntax: .xml)
+            try? serializationDoc.body()?.appendChild(articleContent)
+            return (try? articleContent.html()) ?? ""
+        }
+        if needsSerializationDoc {
+            let serializationDoc = try! SwiftSoup.parse("", url.absoluteString)
+            let outputSettings = serializationDoc.outputSettings()
+            outputSettings.prettyPrint(pretty: false)
+            outputSettings.syntax(syntax: .html)
             try? serializationDoc.body()?.appendChild(articleContent)
             return (try? articleContent.html()) ?? ""
         }
@@ -677,37 +686,4 @@ private extension Readability {
         }.joined(separator: " ")
         print(prefix + " " + message)
     }
-}
-
-private func textContentPreservingWhitespace(of node: Node) -> String {
-    if let text = node as? TextNode {
-        return text.getWholeText()
-    }
-    if let data = node as? DataNode {
-        return data.getWholeData()
-    }
-    if let element = node as? Element {
-        return collectTextPreservingWhitespace(from: element)
-    }
-    return ""
-}
-
-private func collectTextPreservingWhitespace(from element: Element) -> String {
-    var output: [String] = []
-    output.reserveCapacity(8)
-    var stack = Array(element.getChildNodes().reversed())
-    while let node = stack.popLast() {
-        if let text = node as? TextNode {
-            output.append(text.getWholeText())
-        } else if let data = node as? DataNode {
-            output.append(data.getWholeData())
-        } else if let el = node as? Element {
-            let children = el.getChildNodes()
-            if !children.isEmpty {
-                stack.append(contentsOf: children.reversed())
-            }
-        }
-    }
-    if output.isEmpty { return "" }
-    return output.joined()
 }

@@ -59,7 +59,7 @@ struct ParitySupplementaryTests {
             return
         }
         #expect(result.content.contains("itemscope"))
-        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
+        #expect(result.content.contains("itemscope=\"itemscope\""))
     }
 
     @Test func xmlSerializerDefaultPreservesExplicitBooleanValues() throws {

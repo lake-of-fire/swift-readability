@@ -47,7 +47,8 @@ class ProcessorBase {
 
     /// Get the inner text of a node, stripping extra whitespace.
     func getInnerText(_ element: Element, regEx: RegExUtil? = nil, normalizeSpaces: Bool = true) -> String {
-        let textContent = (try? element.text())?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let textContent = textContentPreservingWhitespace(of: element)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if normalizeSpaces, let regEx {
             return regEx.normalize(textContent)
         }

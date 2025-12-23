@@ -34,3 +34,37 @@ extension Array where Element == UInt8 {
         return true
     }
 }
+
+@inline(__always)
+func textContentPreservingWhitespace(of node: Node) -> String {
+    if let text = node as? TextNode {
+        return text.getWholeText()
+    }
+    if let data = node as? DataNode {
+        return data.getWholeData()
+    }
+    if let element = node as? Element {
+        return collectTextPreservingWhitespace(from: element)
+    }
+    return ""
+}
+
+private func collectTextPreservingWhitespace(from element: Element) -> String {
+    var output: [String] = []
+    output.reserveCapacity(8)
+    var stack = Array(element.getChildNodes().reversed())
+    while let node = stack.popLast() {
+        if let text = node as? TextNode {
+            output.append(text.getWholeText())
+        } else if let data = node as? DataNode {
+            output.append(data.getWholeData())
+        } else if let el = node as? Element {
+            let children = el.getChildNodes()
+            if !children.isEmpty {
+                stack.append(contentsOf: children.reversed())
+            }
+        }
+    }
+    if output.isEmpty { return "" }
+    return output.joined()
+}

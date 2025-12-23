@@ -1,8 +1,7 @@
 <div id="readability-page-1" class="page">
     <div>
         <div>
-            <p><a rel="noopener" href="http://fakehost/@vincentvallet?source=post_page-----d6e62af173e2----------------------"><img alt="Vincent Vallet" src="https://miro.medium.com/fit/c/96/96/1*vFTVh_mYyf0p6m7f77A3vw.jpeg" width="48" height="48" /></a>
-            </p>
+            <p><a rel="noopener" href="http://fakehost/@vincentvallet?source=post_page-----d6e62af173e2----------------------"><img alt="Vincent Vallet" src="https://miro.medium.com/fit/c/96/96/1*vFTVh_mYyf0p6m7f77A3vw.jpeg" width="48" height="48" /></a></p>
         </div>
         <h2 id="0231"> Why CPU monitoring is important? </h2>
         <p id="d2c1"> I work at <a href="http://voodoo.io/" target="_blank" rel="noopener nofollow">Voodoo</a>, a French company that creates mobile video games. We have a lot of challenges with performance, availability, and scalability because of the insane amount of traffic our infrastructure supports (billions of events/requests per day …… no joke!). In this setting, every metric is important and gives us a lot of information about the state of our system. </p>
@@ -12,8 +11,7 @@
         <p id="dce9"> For memory, constant monitoring is the best practice to track the worst developer nightmare a.k.a memory leak. </p>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/3788/1*5o3M5niyi911waUrKWVZ0Q.png" width="1894" height="970" role="presentation" data-old-src="https://miro.medium.com/max/60/1*5o3M5niyi911waUrKWVZ0Q.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/3788/1*5o3M5niyi911waUrKWVZ0Q.png" width="1894" height="970" role="presentation" data-old-src="https://miro.medium.com/max/60/1*5o3M5niyi911waUrKWVZ0Q.png?q=20" /></p>
             </div>
             <figcaption> Memory leak in action </figcaption>
         </figure>
@@ -25,8 +23,7 @@
         <p id="40e6"> Most of the time we monitor this resource with a simple solution allowing us to get a graph representing CPU consumption over time. If we want to be reactive we add an alarm, based on a threshold, to warn us when CPU usage is too high. </p>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/1994/1*8uOdeOfnUzTaFIY1r7oAMg.png" width="997" height="230" role="presentation" data-old-src="https://miro.medium.com/max/60/1*8uOdeOfnUzTaFIY1r7oAMg.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/1994/1*8uOdeOfnUzTaFIY1r7oAMg.png" width="997" height="230" role="presentation" data-old-src="https://miro.medium.com/max/60/1*8uOdeOfnUzTaFIY1r7oAMg.png?q=20" /></p>
             </div>
             <figcaption> Basic CPU monitoring </figcaption>
         </figure>
@@ -44,8 +41,7 @@
         <pre><span id="16bd">node --prof app.js</span></pre>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/1698/1*e7gjTlzi55udTXbbPeEs2A.png" width="849" height="534" role="presentation" data-old-src="https://miro.medium.com/max/60/1*e7gjTlzi55udTXbbPeEs2A.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/1698/1*e7gjTlzi55udTXbbPeEs2A.png" width="849" height="534" role="presentation" data-old-src="https://miro.medium.com/max/60/1*e7gjTlzi55udTXbbPeEs2A.png?q=20" /></p>
             </div>
             <figcaption> Output of — prof </figcaption>
         </figure>
@@ -54,8 +50,7 @@
         <pre><span id="061c">node --prof-process isolate-0xnnnnn-v8.log &gt; processed.txt</span></pre>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/1508/1*JJkRh7JihTUo2apW_9ZXAQ.png" width="754" height="306" role="presentation" data-old-src="https://miro.medium.com/max/60/1*JJkRh7JihTUo2apW_9ZXAQ.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/1508/1*JJkRh7JihTUo2apW_9ZXAQ.png" width="754" height="306" role="presentation" data-old-src="https://miro.medium.com/max/60/1*JJkRh7JihTUo2apW_9ZXAQ.png?q=20" /></p>
             </div>
             <figcaption> The output of — prof-process </figcaption>
         </figure>
@@ -64,8 +59,7 @@
         <p id="176a"> ClinicJs is a set of tools that allow you to collect data and display performance charts. With “clinic flame” you can generate a flame graph based on CPU consumption. </p>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/5760/1*6wi5BlNNnykjZs0PufrvLQ.png" width="2880" height="1534" role="presentation" data-old-src="https://miro.medium.com/max/60/1*6wi5BlNNnykjZs0PufrvLQ.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/5760/1*6wi5BlNNnykjZs0PufrvLQ.png" width="2880" height="1534" role="presentation" data-old-src="https://miro.medium.com/max/60/1*6wi5BlNNnykjZs0PufrvLQ.png?q=20" /></p>
             </div>
             <figcaption> Flame chart </figcaption>
         </figure>
@@ -106,8 +100,7 @@
         <p id="6933"> We have an API that we want to test with autocannon tool. At this step, our project is able to serve around 200 requests in 20 seconds. There is probably a mistake somewhere in the code which slows down our application. </p>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/1694/1*cS9IXYGfMmgxaAUlC7oqOQ.png" width="847" height="362" role="presentation" data-old-src="https://miro.medium.com/max/60/1*cS9IXYGfMmgxaAUlC7oqOQ.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/1694/1*cS9IXYGfMmgxaAUlC7oqOQ.png" width="847" height="362" role="presentation" data-old-src="https://miro.medium.com/max/60/1*cS9IXYGfMmgxaAUlC7oqOQ.png?q=20" /></p>
             </div>
         </figure>
         <p id="fb78"> But now, what if we want to trigger a CPU profiling remotely (without ssh connection to the server)? It’s possible using Websocket, SSE or any other technology to send a message to your instance. </p>
@@ -142,8 +135,7 @@
         <p id="d62c"> The CPU profiling after optimizations, with the same time range. </p>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/1860/1*87KlGgfbuWP38nAaQaj3xw.png" width="930" height="523" role="presentation" data-old-src="https://miro.medium.com/max/60/1*87KlGgfbuWP38nAaQaj3xw.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/1860/1*87KlGgfbuWP38nAaQaj3xw.png" width="930" height="523" role="presentation" data-old-src="https://miro.medium.com/max/60/1*87KlGgfbuWP38nAaQaj3xw.png?q=20" /></p>
             </div>
             <figcaption> CPU profiling after optimizations </figcaption>
         </figure>
@@ -153,8 +145,7 @@
         <p id="10f1"> And now our application is able to serve more than 200,000 requests in 20 seconds; <strong>we increased the performance by a factor of 100k</strong>! </p>
         <figure>
             <div>
-                <p><img src="https://miro.medium.com/max/1690/1*kfOK60PtmWx6iP681-qRcg.png" width="845" height="362" role="presentation" data-old-src="https://miro.medium.com/max/60/1*kfOK60PtmWx6iP681-qRcg.png?q=20" />
-                </p>
+                <p><img src="https://miro.medium.com/max/1690/1*kfOK60PtmWx6iP681-qRcg.png" width="845" height="362" role="presentation" data-old-src="https://miro.medium.com/max/60/1*kfOK60PtmWx6iP681-qRcg.png?q=20" /></p>
             </div>
         </figure>
         <h2 id="98b9"> More than just CPU profiling </h2>

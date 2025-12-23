@@ -44,6 +44,13 @@ struct ReadabilityTests {
             // Mozilla's test suite runs js-beautify over both actual and expected HTML
             // before parsing and comparing the DOMs. Do the same to avoid false negatives
             // from formatting-only whitespace differences.
+            if ProcessInfo.processInfo.environment["SWIFT_READABILITY_DUMP_RAW"] == "1" {
+                let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                    .appendingPathComponent("swift-readability-fixture-dumps-raw", isDirectory: true)
+                try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                let rawURL = tempDir.appendingPathComponent("\(fixture.name)-raw.html")
+                try? result.contentHTML.write(to: rawURL, atomically: true, encoding: .utf8)
+            }
             let actualHTML = try MozillaPrettyPrinter.prettyPrint(result.contentHTML)
             let comparison = DOMComparator.compare(
                 actualHTML: actualHTML,
