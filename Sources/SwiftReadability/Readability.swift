@@ -452,8 +452,10 @@ private extension Readability {
                                  articleContent: Element,
                                  useXMLSerializer: Bool,
                                  isLiveDocument: Bool) -> String {
+        let isXmlInput = document.outputSettings().syntax() == .xml
+        let effectiveUseXMLSerializer = useXMLSerializer && isXmlInput
         let sourceHTML: String
-        if useXMLSerializer {
+        if effectiveUseXMLSerializer {
             if !html.isEmpty {
                 sourceHTML = html
             } else {
@@ -462,10 +464,10 @@ private extension Readability {
         } else {
             sourceHTML = ""
         }
-        let explicitBooleanAttrs = useXMLSerializer ? explicitBooleanAttributes(in: sourceHTML) : []
-        if useXMLSerializer, !isLiveDocument {
+        let explicitBooleanAttrs = effectiveUseXMLSerializer ? explicitBooleanAttributes(in: sourceHTML) : []
+        if effectiveUseXMLSerializer, !isLiveDocument {
             normalizeBooleanAttributes(in: articleContent, sourceHTML: sourceHTML, explicitBooleanAttrs: explicitBooleanAttrs)
-            let serializationDoc = try! SwiftSoup.parse("", url.absoluteString)
+            let serializationDoc = try! SwiftSoup.parse("", url.absoluteString, Parser.xmlParser())
             let outputSettings = serializationDoc.outputSettings()
             outputSettings.prettyPrint(pretty: false)
             outputSettings.syntax(syntax: .xml)
@@ -477,8 +479,8 @@ private extension Readability {
         let originalPrettyPrint = outputSettings.prettyPrint()
         let originalSyntax = outputSettings.syntax()
         outputSettings.prettyPrint(pretty: false)
-        outputSettings.syntax(syntax: useXMLSerializer ? .xml : .html)
-        if useXMLSerializer {
+        outputSettings.syntax(syntax: effectiveUseXMLSerializer ? .xml : .html)
+        if effectiveUseXMLSerializer {
             normalizeBooleanAttributes(in: articleContent, sourceHTML: sourceHTML, explicitBooleanAttrs: explicitBooleanAttrs)
         }
         let html = (try? articleContent.html()) ?? ""
