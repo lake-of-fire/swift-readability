@@ -27,7 +27,7 @@ class ProcessorBase {
     func replaceNodes(in parent: Element, tagName: String, newTagName: String) {
         guard let elements = try? parent.getElementsByTag(tagName) else { return }
         for element in elements {
-            try? element.tagName(newTagName)
+            _ = try? element.tagName(newTagName)
         }
     }
 

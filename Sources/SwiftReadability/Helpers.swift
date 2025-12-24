@@ -11,15 +11,22 @@ extension Element {
         (try? className()) ?? ""
     }
     func idSafe() -> String {
-        (try? id()) ?? ""
+        id()
     }
     func tagNameSafe() -> String {
-        (try? tagName()) ?? ""
+        tagName()
+    }
+
+    /// Fallback token to detect text mutations when SwiftSoup doesn't expose one.
+    /// Uses the full text hash plus child count to invalidate caches when content changes.
+    func textMutationVersionToken() -> Int {
+        let textHash = textContentPreservingWhitespace(of: self).hashValue
+        return textHash ^ getChildNodes().count
     }
 }
 
 extension Elements {
-    var firstSafe: Element? { (try? first()) ?? nil }
+    var firstSafe: Element? { first() }
 }
 
 extension Array where Element == UInt8 {

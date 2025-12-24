@@ -305,22 +305,22 @@ final class ArticleGrabber: ProcessorBase {
             }
 
             if created {
-                try? topCandidate.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityPage1)
-                try? topCandidate.addClass("page")
+                _ = try? topCandidate.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityPage1)
+                _ = try? topCandidate.addClass("page")
             } else {
                 guard let div = try? doc.createElement("div") else { return nil }
-                try? div.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityPage1)
-                try? div.addClass("page")
+                _ = try? div.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityPage1)
+                _ = try? div.addClass("page")
                 for child in Array(articleContent.getChildNodes()) {
-                    try? child.remove()
-                    try? div.appendChild(child)
+                    _ = try? child.remove()
+                    _ = try? div.appendChild(child)
                 }
-                try? articleContent.appendChild(div)
+                _ = try? articleContent.appendChild(div)
             }
 
             let textLength = getInnerText(articleContent, regEx: regEx, normalizeSpaces: true).count
             if textLength < self.charThreshold {
-                try? page.html(pageCacheHtml)
+                _ = try? page.html(pageCacheHtml)
                 // Restoring the page HTML replaces the DOM nodes. Any per-node state we keep in
                 // dictionaries must be cleared between attempts to avoid stale lookups (and pointer reuse).
                 readabilityObjects.removeAll(keepingCapacity: true)
@@ -495,8 +495,9 @@ final class ArticleGrabber: ProcessorBase {
                         timing: timing,
                         cache: linkDensityCache
                     )
-                    if linkDensity < 0.25, let newNode = try? current.child(0) {
-                        try? current.replaceWith(newNode)
+                    if linkDensity < 0.25 {
+                        let newNode = current.child(0)
+                        _ = try? current.replaceWith(newNode)
                         elementsToScore.append(newNode)
                         node = getNextNode(node: newNode)
                         continue
@@ -529,7 +530,7 @@ final class ArticleGrabber: ProcessorBase {
                 while let current = node, isPhrasingContent(current, cache: &phrasingCache) {
                     let next = current.nextSibling()
                     fragment.append(current)
-                    try? current.remove()
+                    _ = try? current.remove()
                     node = next
                     nextAfterFragment = next
                 }
@@ -543,9 +544,9 @@ final class ArticleGrabber: ProcessorBase {
 
                 if !fragment.isEmpty, let p = try? doc.createElement("p") {
                     for n in fragment {
-                        try? p.appendChild(n)
+                        _ = try? p.appendChild(n)
                     }
-                    try? div.insertChildren(insertionIndex, [p])
+                    _ = try? div.insertChildren(insertionIndex, [p])
                 }
 
                 childNode = nextAfterFragment
@@ -742,7 +743,8 @@ final class ArticleGrabber: ProcessorBase {
 
     private func hasSinglePInsideElement(element: Element) -> Bool {
         if element.children().count != 1 { return false }
-        guard let child = try? element.child(0), child.tagNameUTF8() == ReadabilityUTF8Arrays.p else { return false }
+        let child = element.child(0)
+        guard child.tagNameUTF8() == ReadabilityUTF8Arrays.p else { return false }
         for node in element.getChildNodes() {
             if let text = node as? TextNode, regEx.hasContent(text.getWholeText()) {
                 return false
@@ -761,7 +763,7 @@ final class ArticleGrabber: ProcessorBase {
     }
 
     private func setNodeTag(node: Element, tagName: [UInt8]) {
-        try? node.tagName(tagName)
+        _ = try? node.tagName(tagName)
     }
 
     // MARK: Second step: score elements
@@ -978,10 +980,10 @@ final class ArticleGrabber: ProcessorBase {
         if topCandidate == nil || topCandidate?.tagNameUTF8() == ReadabilityUTF8Arrays.body {
             let newTop = (try? page.ownerDocument()?.createElement("div")) ?? Element(try! Tag.valueOf("div"), "")
             for child in Array(page.getChildNodes()) {
-                try? child.remove()
-                try? newTop.appendChild(child)
+                _ = try? child.remove()
+                _ = try? newTop.appendChild(child)
             }
-            try? page.appendChild(newTop)
+            _ = try? page.appendChild(newTop)
             _ = initializeNode(node: newTop, options: options)
             return (newTop, true)
         } else {
@@ -1116,7 +1118,7 @@ final class ArticleGrabber: ProcessorBase {
                                       linkDensityCache: LinkDensityCache) -> Element {
         let articleContent = (try? doc.createElement("div")) ?? Element(try! Tag.valueOf("div"), "")
         if isPaging {
-            try? articleContent.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityContent)
+            _ = try? articleContent.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityContent)
         }
         guard let topReadability = getReadabilityObject(element: topCandidate) else { return articleContent }
 
@@ -1158,7 +1160,7 @@ final class ArticleGrabber: ProcessorBase {
                 if !alterToDivExceptions.contains(sibling.tagNameUTF8()) {
                     setNodeTag(node: sibling, tagName: ReadabilityUTF8Arrays.div)
                 }
-                try? articleContent.appendChild(sibling)
+                _ = try? articleContent.appendChild(sibling)
             }
         }
         return articleContent
@@ -1240,7 +1242,7 @@ final class ArticleGrabber: ProcessorBase {
         // Replace H1 with H2 as H1 should be only title that is displayed separately.
         if let h1s = try? articleContent.select("h1") {
             for h1 in h1s {
-                try? h1.tagName("h2")
+                _ = try? h1.tagName("h2")
             }
         }
 
@@ -1255,21 +1257,19 @@ final class ArticleGrabber: ProcessorBase {
         }
 
         if let brs = try? articleContent.select("br") {
-        for br in brs {
-            if let next = nextElement(from: br.nextSibling(), regEx: regEx), next.tagNameUTF8() == ReadabilityUTF8Arrays.p {
-                try? br.remove()
+            for br in brs {
+                if let next = nextElement(from: br.nextSibling(), regEx: regEx), next.tagNameUTF8() == ReadabilityUTF8Arrays.p {
+                    _ = try? br.remove()
+                }
             }
-        }
         }
 
         // Remove single-cell tables (Readability.js _prepArticle)
         if let tables = try? articleContent.getElementsByTag("table") {
             for table in Array(tables) {
                 let tbody: Element = {
-                    if self.hasSingleTagInsideElement(table, tagName: ReadabilityUTF8Arrays.tbody),
-                       let first = try? table.child(0)
-                    {
-                        return first
+                    if self.hasSingleTagInsideElement(table, tagName: ReadabilityUTF8Arrays.tbody) {
+                        return table.child(0)
                     }
                     return table
                 }()
@@ -1287,8 +1287,8 @@ final class ArticleGrabber: ProcessorBase {
                     self.isPhrasingContent(child, cache: &phrasingCache)
                 }
                 setNodeTag(node: cell, tagName: allPhrasing ? ReadabilityUTF8Arrays.p : ReadabilityUTF8Arrays.div)
-                try? cell.remove()
-                try? table.replaceWith(cell)
+                _ = try? cell.remove()
+                _ = try? table.replaceWith(cell)
             }
         }
     }
@@ -1336,7 +1336,7 @@ final class ArticleGrabber: ProcessorBase {
                             let b64Starts = match.range(at: 0).length
                             let b64Length = src.utf16.count - b64Starts
                             if b64Length < 133 {
-                                try? elem.removeAttr(ReadabilityUTF8Arrays.src)
+                                _ = try? elem.removeAttr(ReadabilityUTF8Arrays.src)
                                 src = String(decoding: elem.attrOrEmptyUTF8(ReadabilityUTF8Arrays.src), as: UTF8.self)
                             }
                         }
@@ -1370,7 +1370,7 @@ final class ArticleGrabber: ProcessorBase {
 
                 let tagName = elem.tagNameUTF8()
                 if tagName == ReadabilityUTF8Arrays.img || tagName == ReadabilityUTF8Arrays.picture {
-                    try? elem.attr(copyTo, value)
+                    _ = try? elem.attr(copyTo, value)
                 } else if tagName == ReadabilityUTF8Arrays.figure {
                     if ((try? elem.select("img, picture").count) ?? 0) > 0 {
                         continue
@@ -1381,8 +1381,8 @@ final class ArticleGrabber: ProcessorBase {
                         }
                         return Element(try! Tag.valueOf("img"), "")
                     }()
-                    try? img.attr(copyTo, value)
-                    try? elem.appendChild(img)
+                    _ = try? img.attr(copyTo, value)
+                    _ = try? elem.appendChild(img)
                 }
             }
         }
@@ -1391,11 +1391,11 @@ final class ArticleGrabber: ProcessorBase {
     private func cleanStyles(e: Element) {
         if e.tagNameUTF8() == ReadabilityUTF8Arrays.svg { return }
         for attrName in presentationalAttributes {
-            try? e.removeAttr(attrName)
+            _ = try? e.removeAttr(attrName)
         }
         if deprecatedSizeAttributeElems.contains(e.tagNameUTF8()) {
-            try? e.removeAttr(ReadabilityUTF8Arrays.width)
-            try? e.removeAttr(ReadabilityUTF8Arrays.height)
+            _ = try? e.removeAttr(ReadabilityUTF8Arrays.width)
+            _ = try? e.removeAttr(ReadabilityUTF8Arrays.height)
         }
         for child in e.children() {
             cleanStyles(e: child)

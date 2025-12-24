@@ -472,7 +472,7 @@ private extension Readability {
             let outputSettings = serializationDoc.outputSettings()
             outputSettings.prettyPrint(pretty: false)
             outputSettings.syntax(syntax: .xml)
-            try? serializationDoc.body()?.appendChild(articleContent)
+            _ = try? serializationDoc.body()?.appendChild(articleContent)
             return (try? articleContent.html()) ?? ""
         }
         if needsSerializationDoc {
@@ -480,7 +480,7 @@ private extension Readability {
             let outputSettings = serializationDoc.outputSettings()
             outputSettings.prettyPrint(pretty: false)
             outputSettings.syntax(syntax: .html)
-            try? serializationDoc.body()?.appendChild(articleContent)
+            _ = try? serializationDoc.body()?.appendChild(articleContent)
             return (try? articleContent.html()) ?? ""
         }
 
@@ -545,7 +545,7 @@ private extension Readability {
                     sourceHTML: sourceHTML,
                     matchCache: &matchCache
                 ) {
-                    try? element.attr(attr.getKey(), attr.getKey())
+                    _ = try? element.attr(attr.getKey(), attr.getKey())
                 }
             }
         }

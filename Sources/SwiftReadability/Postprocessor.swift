@@ -34,19 +34,16 @@ final class Postprocessor: ProcessorBase {
 
                 if hasSingleTagInsideElement(current, tagName: ReadabilityUTF8Arrays.div) ||
                     hasSingleTagInsideElement(current, tagName: ReadabilityUTF8Arrays.section) {
-                    guard let child = try? current.child(0) else {
-                        node = getNextNode(from: current)
-                        continue
-                    }
+                    let child = current.child(0)
 
                     // Copy attributes from parent to child.
                     if let attrs = current.getAttributes() {
                         for attr in attrs {
-                            try? child.attr(attr.getKeyUTF8(), attr.getValueUTF8())
+                            _ = try? child.attr(attr.getKeyUTF8(), attr.getValueUTF8())
                         }
                     }
 
-                    try? current.replaceWith(child)
+                    _ = try? current.replaceWith(child)
                     node = child
                     continue
                 }
@@ -67,7 +64,8 @@ final class Postprocessor: ProcessorBase {
 
     private func hasSingleTagInsideElement(_ element: Element, tagName: [UInt8]) -> Bool {
         if element.children().count != 1 { return false }
-        guard let onlyChild = try? element.child(0), onlyChild.tagNameUTF8() == tagName else { return false }
+        let onlyChild = element.child(0)
+        guard onlyChild.tagNameUTF8() == tagName else { return false }
         for node in element.getChildNodes() {
             if let text = node as? TextNode, !text.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return false
@@ -78,7 +76,7 @@ final class Postprocessor: ProcessorBase {
 
     private func removeAndGetNext(_ node: Element) -> Element? {
         let nextNode = getNextNode(from: node, ignoreSelfAndKids: true)
-        try? node.remove()
+        _ = try? node.remove()
         return nextNode
     }
 
@@ -220,7 +218,7 @@ final class Postprocessor: ProcessorBase {
                     replaceJavascriptLink(link)
                 } else {
                     let resolved = toAbsoluteURI(href)
-                    try? link.attr(ReadabilityUTF8Arrays.href, resolved.utf8Array)
+                    _ = try? link.attr(ReadabilityUTF8Arrays.href, resolved.utf8Array)
                 }
             }
         }
@@ -232,14 +230,14 @@ final class Postprocessor: ProcessorBase {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !src.isEmpty {
                     let resolved = toAbsoluteURI(src)
-                    try? media.attr(ReadabilityUTF8Arrays.src, resolved.utf8Array)
+                    _ = try? media.attr(ReadabilityUTF8Arrays.src, resolved.utf8Array)
                 }
 
                 let poster = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.poster), as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !poster.isEmpty {
                     let resolved = toAbsoluteURI(poster)
-                    try? media.attr(ReadabilityUTF8Arrays.poster, resolved.utf8Array)
+                    _ = try? media.attr(ReadabilityUTF8Arrays.poster, resolved.utf8Array)
                 }
 
                 let srcset = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.srcset), as: UTF8.self)
@@ -252,7 +250,7 @@ final class Postprocessor: ProcessorBase {
                         let descriptor = descriptorRange.location != NSNotFound ? nsString.substring(with: descriptorRange) : ""
                         return toAbsoluteURI(urlPart) + descriptor + commaPart
                     }
-                    try? media.attr(ReadabilityUTF8Arrays.srcset, newSrcset.utf8Array)
+                    _ = try? media.attr(ReadabilityUTF8Arrays.srcset, newSrcset.utf8Array)
                 }
             }
         }
@@ -276,7 +274,7 @@ final class Postprocessor: ProcessorBase {
         if children.count == 1, children[0] is TextNode {
             let wholeText = (children[0] as? TextNode)?.getWholeText() ?? ""
             let text = TextNode(wholeText, nil)
-            try? link.replaceWith(text)
+            _ = try? link.replaceWith(text)
         } else {
             let container: Element = {
                 if let doc = link.ownerDocument(), let span = try? doc.createElement("span") {
@@ -285,14 +283,14 @@ final class Postprocessor: ProcessorBase {
                 return Element(try! Tag.valueOf("span"), "")
             }()
             for child in children {
-                try? child.remove()
-                try? container.appendChild(child)
+                _ = try? child.remove()
+                _ = try? container.appendChild(child)
             }
             if (try? link.replaceWith(container)) == nil {
                 if let parent = link.parent() {
                     let index = link.siblingIndex
-                    try? link.remove()
-                    try? parent.insertChildren(index, [container])
+                    _ = try? link.remove()
+                    _ = try? parent.insertChildren(index, [container])
                 }
             }
         }
@@ -326,9 +324,9 @@ final class Postprocessor: ProcessorBase {
             .filter { classesToPreserve.contains($0) && seen.insert($0).inserted }
 
         if keptClassNames.isEmpty {
-            try? node.removeAttr(ReadabilityUTF8Arrays.class_)
+            _ = try? node.removeAttr(ReadabilityUTF8Arrays.class_)
         } else {
-            try? node.attr(ReadabilityUTF8Arrays.class_, keptClassNames.joined(separator: " ").utf8Array)
+            _ = try? node.attr(ReadabilityUTF8Arrays.class_, keptClassNames.joined(separator: " ").utf8Array)
         }
         for child in node.children() {
             cleanClasses(node: child, classesToPreserve: classesToPreserve)

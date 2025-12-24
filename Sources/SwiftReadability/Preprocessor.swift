@@ -76,7 +76,7 @@ final class Preprocessor: ProcessorBase {
 
             guard let tmp = try? document.createElement("div") else { continue }
             let inner = (try? noscript.html()) ?? ""
-            try? tmp.html(inner)
+            _ = try? tmp.html(inner)
 
             guard let prevElement = (try? noscript.previousElementSibling()) ?? nil else { continue }
             guard isSingleImage(prevElement) else { continue }
@@ -109,16 +109,16 @@ final class Preprocessor: ProcessorBase {
                     if newImg.hasAttr(nameBytes) {
                         let nameString = String(decoding: nameBytes, as: UTF8.self)
                         let attrName = "data-old-" + nameString
-                        try? newImg.attr(attrName, value)
+                        _ = try? newImg.attr(attrName, value)
                     } else {
-                        try? newImg.attr(nameBytes, valueBytes)
+                        _ = try? newImg.attr(nameBytes, valueBytes)
                     }
                 }
             }
 
             // Replace the placeholder element with the noscript image.
             if let replacement = tmp.children().firstSafe {
-                try? prevElement.replaceWith(replacement)
+                _ = try? prevElement.replaceWith(replacement)
             }
         }
     }
@@ -254,7 +254,7 @@ final class Preprocessor: ProcessorBase {
                     if let doc = br.ownerDocument(), let el = try? doc.createElement("p") { return el }
                     return Element(try! Tag.valueOf("p"), "")
                 }()
-                try? br.replaceWith(p)
+                _ = try? br.replaceWith(p)
 
                 next = p.nextSibling()
                 while let current = next {
@@ -273,16 +273,16 @@ final class Preprocessor: ProcessorBase {
                     }
 
                     let sibling = current.nextSibling()
-                    try? p.appendChild(current)
+                    _ = try? p.appendChild(current)
                     next = sibling
                 }
 
                 while let last = p.getChildNodes().last, isWhitespace(last) {
-                    try? last.remove()
+                    _ = try? last.remove()
                 }
 
                 if let parent = p.parent(), parent.tagNameUTF8() == ReadabilityUTF8Arrays.p {
-                    try? parent.tagName(ReadabilityUTF8Arrays.div)
+                    _ = try? parent.tagName(ReadabilityUTF8Arrays.div)
                 }
             }
         }
