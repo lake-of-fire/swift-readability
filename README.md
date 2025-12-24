@@ -5,7 +5,7 @@ A Swift 6.2 port of Mozilla's Readability.js using SwiftSoup for DOM parsing.
 ## Requirements
 
 - Swift 6.2
-- iOS 15+, macOS 15+
+- iOS 15+, macOS 13+
 
 ## Installation (SwiftPM)
 

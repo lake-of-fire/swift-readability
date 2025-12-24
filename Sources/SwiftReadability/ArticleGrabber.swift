@@ -172,6 +172,7 @@ final class ArticleGrabber: ProcessorBase {
     private var readabilityDataTable: [ObjectIdentifier: Bool] = [:]
     private final class LinkDensityCache {
         var map: [ObjectIdentifier: Double] = [:]
+        var textMutationVersion: Int = -1
     }
 
     init(options: ReadabilityOptions, regEx: RegExUtil = RegExUtil()) {
@@ -1062,6 +1063,15 @@ final class ArticleGrabber: ProcessorBase {
                                 textLength: Int? = nil,
                                 timing: TimingSink? = nil,
                                 cache: LinkDensityCache) -> Double {
+        let currentVersion = element.textMutationVersionToken()
+        if cache.textMutationVersion != currentVersion {
+            cache.map.removeAll(keepingCapacity: true)
+            cache.textMutationVersion = currentVersion
+        }
+        let cacheKey = ObjectIdentifier(element)
+        if let cached = cache.map[cacheKey] {
+            return cached
+        }
         let textLength = textLength ?? getInnerText(element, regEx: regEx).count
         if textLength == 0 { return 0.0 }
         var linkLength = 0.0
@@ -1095,6 +1105,7 @@ final class ArticleGrabber: ProcessorBase {
             }
         }
         let density = linkLength / Double(textLength)
+        cache.map[cacheKey] = density
         return density
     }
 

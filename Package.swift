@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "SwiftReadability",
     platforms: [
-        .macOS(.v15),
+        .macOS(.v13),
         .iOS(.v15),
         .tvOS(.v15),
         .watchOS(.v9)
