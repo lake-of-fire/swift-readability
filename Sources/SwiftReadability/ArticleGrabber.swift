@@ -1065,7 +1065,7 @@ final class ArticleGrabber: ProcessorBase {
                                 textLength: Int? = nil,
                                 timing: TimingSink? = nil,
                                 cache: LinkDensityCache) -> Double {
-        let currentVersion = element.textMutationVersionToken()
+        let currentVersion = element.swiftReadabilityTextMutationVersionToken()
         if cache.textMutationVersion != currentVersion {
             cache.map.removeAll(keepingCapacity: true)
             cache.textMutationVersion = currentVersion

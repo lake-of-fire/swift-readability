@@ -19,7 +19,7 @@ extension Element {
 
     /// Fallback token to detect text mutations when SwiftSoup doesn't expose one.
     /// Uses the full text hash plus child count to invalidate caches when content changes.
-    func textMutationVersionToken() -> Int {
+    func swiftReadabilityTextMutationVersionToken() -> Int {
         let textHash = textContentPreservingWhitespace(of: self).hashValue
         return textHash ^ getChildNodes().count
     }
