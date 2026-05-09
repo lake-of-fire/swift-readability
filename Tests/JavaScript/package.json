@@ -1,0 +1,15 @@
+{
+  "name": "swift-readability-javascript-tests",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "mocha test/readability-fixtures.test.js"
+  },
+  "devDependencies": {
+    "chai": "4.3.7",
+    "js-beautify": "1.14.7",
+    "jsdom": "20.0.2",
+    "mocha": "10.8.2",
+    "xml-name-validator": "5.0.0"
+  }
+}

@@ -59,10 +59,10 @@ struct ParitySupplementaryTests {
             return
         }
         #expect(result.content.contains("itemscope"))
-        #expect(result.content.contains("itemscope=\"itemscope\""))
+        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
     }
 
-    @Test func xmlSerializerDefaultPreservesExplicitBooleanValues() throws {
+    @Test func xmlSerializerDoesNotForceXMLForHTMLInput() throws {
         let html = """
         <html>
           <body>
@@ -81,7 +81,8 @@ struct ParitySupplementaryTests {
             #expect(false, "Expected parse() to return a result")
             return
         }
-        #expect(result.content.contains("itemscope=\"itemscope\""))
+        #expect(result.content.contains("itemscope"))
+        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
     }
 
     @Test func disableJSONLDSkipsStructuredData() throws {
@@ -162,7 +163,7 @@ struct ParitySupplementaryTests {
         #expect(result.content.contains("dropme"))
     }
 
-    @Test func xmlSerializerPromotesExplicitBooleanAttributeValues() throws {
+    @Test func xmlSerializerDoesNotPromoteHTMLBooleanAttributeValues() throws {
         let html = """
         <html>
           <body>
@@ -181,7 +182,8 @@ struct ParitySupplementaryTests {
             #expect(false, "Expected parse() to return a result")
             return
         }
-        #expect(result.content.contains("itemscope=\"itemscope\""))
+        #expect(result.content.contains("itemscope"))
+        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
     }
 
     @Test func maxElemsToParseAppliesToDocumentPipeline() throws {

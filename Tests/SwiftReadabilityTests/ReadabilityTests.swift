@@ -223,10 +223,18 @@ enum DOMComparator {
             for attribute in attributes {
                 let key = attribute.getKey()
                 guard isValidXMLName(key) else { continue }
-                attrs[key] = attribute.getValue()
+                let value = attribute.getValue()
+                attrs[key] = normalizedAttributeValue(key: key, value: value)
             }
         }
         return attrs
+    }
+
+    private static func normalizedAttributeValue(key: String, value: String) -> String {
+        if value.isEmpty, ["allowfullscreen", "itemscope"].contains(key.lowercased()) {
+            return key
+        }
+        return value
     }
 
     private static func isValidXMLName(_ name: String) -> Bool {
@@ -312,7 +320,13 @@ process.stdout.write(output);
             .deletingLastPathComponent() // Tests/SwiftReadabilityTests
             .deletingLastPathComponent() // Tests
             .deletingLastPathComponent() // repo root
-        let nodeCwd = repoRoot.appendingPathComponent("tmp-readability", isDirectory: true)
+        let javascriptTestCwd = repoRoot
+            .appendingPathComponent("Tests", isDirectory: true)
+            .appendingPathComponent("JavaScript", isDirectory: true)
+        let legacyNodeCwd = repoRoot.appendingPathComponent("tmp-readability", isDirectory: true)
+        let nodeCwd = FileManager.default.fileExists(
+            atPath: javascriptTestCwd.appendingPathComponent("node_modules/js-beautify").path
+        ) ? javascriptTestCwd : legacyNodeCwd
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")

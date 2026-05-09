@@ -88,6 +88,32 @@ Filter fixtures:
 SWIFT_READABILITY_FIXTURES=nytimes-3 swift test -q -Xswiftc -suppress-warnings
 ```
 
+Run the JavaScript Readability fixture parity suite:
+
+```
+npm --prefix Tests/JavaScript install
+npm --prefix Tests/JavaScript test
+```
+
+The JavaScript suite uses `Sources/SwiftReadability/Resources/Readability.js`.
+By default it runs the validated fixtures listed in `Tests/JavaScript/fixtures.txt`.
+`SWIFT_READABILITY_FIXTURES` and `SWIFT_READABILITY_FIXTURE_REGEX` can be used to
+run specific fixtures from the shared Mozilla-format corpus.
+
+Run the full passing JavaScript corpus:
+
+```
+SWIFT_READABILITY_FIXTURE_REGEX='.*' npm --prefix Tests/JavaScript test
+```
+
+Known JS-vs-Swift fixture divergences are listed in
+`Tests/JavaScript/known-failures.txt` and are skipped by default. Include them
+for parity investigation with:
+
+```
+SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES=1 SWIFT_READABILITY_FIXTURE_REGEX='.*' npm --prefix Tests/JavaScript test
+```
+
 ## Benchmark
 
 Run the local benchmark harness (fixtures-based):

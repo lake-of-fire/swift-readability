@@ -73,3 +73,4 @@ DerivedData/
 # Local porting artifacts
 tmp-*/
 tmp-*
+node_modules/
