@@ -138,13 +138,13 @@ Readability.prototype = {
     // NOTE: These two regular expressions are duplicated in
     // Readability-readerable.js. Please keep both copies in sync.
     unlikelyCandidates:
-      /-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
+      /-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
     okMaybeItsACandidate: /and|article|body|column|content|main|shadow/i,
 
     positive:
       /article|body|content|entry|hentry|h-entry|main|page|pagination|post|text|blog|story/i,
     negative:
-      /-ad-|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget/i,
+      /-ad-|admod|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|notprint|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget/i,
     extraneous:
       /print|archive|comment|discuss|e[\-]?mail|share|reply|all|login|sign|single|utility/i,
     byline: /byline|author|dateline|writtenby|p-author/i,
@@ -810,6 +810,7 @@ Readability.prototype = {
         );
       });
     });
+    this._cleanArticleChrome(articleContent);
 
     this._clean(articleContent, "iframe");
     this._clean(articleContent, "input");
@@ -2549,6 +2550,7 @@ Readability.prototype = {
         );
         var textDensity = this._getTextDensity(node, textishTags);
         var isFigureChild = this._hasAncestorTag(node, "figure");
+        var hasSignificantMedia = this._hasSignificantMediaContent(node, img);
 
         // apply shadiness checks, then check for exceptions
         const shouldRemoveNode = () => {
@@ -2575,6 +2577,7 @@ Readability.prototype = {
             );
           }
           if (
+            !hasSignificantMedia &&
             !isList &&
             weight < 25 &&
             linkDensity > 0.2 + this._linkDensityModifier
@@ -2628,6 +2631,157 @@ Readability.prototype = {
       }
       return false;
     });
+  },
+
+  _cleanArticleChrome(articleContent) {
+    this._removeNodes(this._getAllNodesWithTag(articleContent, ["ul"]), function (list) {
+      return this._isArticleActionList(list);
+    });
+
+    this._removeNodes(this._getAllNodesWithTag(articleContent, ["div"]), function (node) {
+      return (
+        this._isCompactNonPrintOrAdNode(node) ||
+        this._isCompactRelatedSection(node)
+      );
+    });
+
+    this._removeNodes(this._getAllNodesWithTag(articleContent, ["section"]), function (node) {
+      return this._isCompactRelatedSection(node);
+    });
+
+    this._removeNodes(this._getAllNodesWithTag(articleContent, ["p"]), function (paragraph) {
+      return /^\s*\[?\s*PR\s*\]?\s*$/i.test(this._getInnerText(paragraph));
+    });
+
+    this._removeCompactComponentContainers(
+      articleContent,
+      /(paid|subscribe|register|login)/i,
+      500
+    );
+  },
+
+  _isArticleActionList(list) {
+    var dataContentType = list.getAttribute("data-content-type") || "";
+    var componentText = this._componentNames(list).join(" ");
+    var text = this._getInnerText(list);
+    var hasActionComponent =
+      /(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*/i.test(
+        componentText
+      );
+    var hasActionText =
+      text.includes("印刷") ||
+      /share/i.test(text) ||
+      text.includes("シェア") ||
+      /facebook/i.test(text) ||
+      /twitter/i.test(text);
+
+    if (
+      dataContentType.toLowerCase() === "article" &&
+      (hasActionComponent || hasActionText)
+    ) {
+      return true;
+    }
+    return hasActionComponent && text.length < 300;
+  },
+
+  _isCompactNonPrintOrAdNode(node) {
+    var matchString = `${node.className || ""} ${node.id || ""}`.toLowerCase();
+    if (!matchString.includes("notprint") && !matchString.includes("admod")) {
+      return false;
+    }
+    return this._getInnerText(node).length < 500;
+  },
+
+  _isCompactRelatedSection(node) {
+    var text = this._getInnerText(node);
+    if (text.length >= 500) {
+      return false;
+    }
+    var headingText = Array.from(this._getAllNodesWithTag(node, [
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+    ]))
+      .map(heading => this._getInnerText(heading))
+      .join(" ");
+    if (!/(related|recommended|関連記事|関連トピック|ジャンル)/i.test(headingText)) {
+      return false;
+    }
+    return this._getLinkDensity(node) > 0.15 || node.getElementsByTagName("a").length > 0;
+  },
+
+  _removeCompactComponentContainers(articleContent, componentPattern, maximumTextLength) {
+    this._forEachNode(this._allElements(articleContent), function (component) {
+      var componentName = component.getAttribute("x-component-name") || "";
+      if (!componentPattern.test(componentName)) {
+        return;
+      }
+
+      var candidate = null;
+      var current = component;
+      while (current && current !== articleContent) {
+        var tagName = current.tagName;
+        if (tagName === "DIV" || tagName === "SECTION" || tagName === "ASIDE") {
+          if (this._getInnerText(current).length <= maximumTextLength) {
+            candidate = current;
+          }
+        }
+        current = current.parentNode;
+      }
+      if (candidate && candidate.parentNode) {
+        candidate.parentNode.removeChild(candidate);
+      }
+    });
+  },
+
+  _componentNames(element) {
+    return this._allElements(element)
+      .map(node => node.getAttribute("x-component-name"))
+      .filter(Boolean);
+  },
+
+  _allElements(element) {
+    var result = [];
+    var stack = [element];
+    while (stack.length) {
+      var current = stack.pop();
+      result.push(current);
+      for (var i = current.children.length - 1; i >= 0; i--) {
+        stack.push(current.children[i]);
+      }
+    }
+    return result;
+  },
+
+  _hasSignificantMediaContent(node, imgCount) {
+    if (imgCount <= 0) {
+      return false;
+    }
+    var figureCount = node.getElementsByTagName("figure").length;
+    var pictureCount = node.getElementsByTagName("picture").length;
+    if (figureCount + pictureCount !== 1) {
+      return false;
+    }
+    if (this._getAllNodesWithTag(node, ["h1", "h2", "h3", "h4", "h5", "h6"]).length > 0) {
+      return false;
+    }
+    if (
+      this._getAllNodesWithTag(node, [
+        "iframe",
+        "object",
+        "embed",
+        "input",
+        "button",
+        "select",
+        "textarea",
+      ]).length > 0
+    ) {
+      return false;
+    }
+    return this._getInnerText(node).length < 500;
   },
 
   /**

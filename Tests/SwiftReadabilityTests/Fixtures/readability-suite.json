@@ -1,0 +1,105 @@
+{
+  "baseURL": "http://fakehost/test/page.html",
+  "defaultFixtureSelection": {
+    "javascript": [
+      "nihongoschool-glasgow"
+    ]
+  },
+  "assertions": {
+    "asahi-junk-image": {
+      "textExcludes": [
+        "印刷する",
+        "メールでシェアする",
+        "Facebookでシェアする",
+        "[PR]",
+        "有料会員になると会員限定の有料記事もお読みいただけます。",
+        "※無料期間中に解約した場合、料金はかかりません",
+        "関連トピック・ジャンル",
+        "ジャンル"
+      ],
+      "contentIncludes": [
+        "AS20260523000778.jpg",
+        "車8台が絡む追突事故があった現場"
+      ]
+    }
+  },
+  "knownFailures": [
+    {
+      "name": "heise",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "lwn-1",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "mathjax",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "mercurial",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "nytimes-3",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "nytimes-4",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "nytimes-5",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "qq",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "schema-org-context-object",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "title-en-dash",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    },
+    {
+      "name": "wapo-1",
+      "runners": [
+        "javascript"
+      ],
+      "reason": "Current JavaScript output differs from the shared Swift fixture expectation."
+    }
+  ]
+}

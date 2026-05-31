@@ -36,7 +36,8 @@ let package = Package(
                 .product(name: "SwiftSoup", package: "SwiftSoup")
             ],
             resources: [
-                .copy("Resources/Readability.js")
+                .copy("Resources/Readability.js"),
+                .copy("Resources/Readability-readerable.js")
             ]
         ),
         .executableTarget(

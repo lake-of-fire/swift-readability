@@ -1,0 +1,23 @@
+[tasks."test:swift"]
+description = "Run the Swift Readability fixture and API tests"
+run = """
+set -euo pipefail
+swift test -q -Xswiftc -suppress-warnings
+"""
+
+[tasks."test:javascript"]
+description = "Run the JavaScript Readability parity suite against the shared fixture manifest"
+run = """
+set -euo pipefail
+npm --prefix Tests/JavaScript ci
+
+if [ -z "${SWIFT_READABILITY_FIXTURES:-}" ] && [ -z "${SWIFT_READABILITY_FIXTURE_REGEX:-}" ]; then
+  export SWIFT_READABILITY_FIXTURE_REGEX='.*'
+fi
+
+npm --prefix Tests/JavaScript test
+"""
+
+[tasks."test:parity"]
+description = "Run Swift and JavaScript Readability against the shared fixture corpus"
+depends = ["test:swift", "test:javascript"]

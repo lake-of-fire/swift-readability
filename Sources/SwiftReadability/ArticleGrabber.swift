@@ -1216,6 +1216,7 @@ final class ArticleGrabber: ProcessorBase {
                 return self.isTextLengthLessThan(text, shareElementThreshold)
             }
         }
+        cleanArticleChrome(articleContent: articleContent, linkDensityCache: linkDensityCache)
 
         if let timing {
             _ = timing.measure("grab.clean.iframe") { clean(e: articleContent, tag: "iframe") }
@@ -1612,6 +1613,7 @@ final class ArticleGrabber: ProcessorBase {
                 let textDensity = self.getTextDensity(node, tags: Array(textishTags), textLength: innerTextLength, timing: timing)
                 let isFigureChild = self.hasAncestorTag(node: node, tagName: ReadabilityUTF8Arrays.figure)
                 let linkDensityModifier = self.linkDensityModifier
+                let hasSignificantMedia = self.hasSignificantMediaContent(in: node, imgCount: img)
 
                 var haveToRemove = false
                 if !isFigureChild && img > 1 && Double(p) / Double(img) < 0.5 {
@@ -1627,7 +1629,7 @@ final class ArticleGrabber: ProcessorBase {
                             (img == 0 || img > 2) &&
                             linkDensity > 0 {
                     haveToRemove = true
-                } else if !isList && weight < 25 && linkDensity > 0.2 + linkDensityModifier {
+                } else if !hasSignificantMedia && !isList && weight < 25 && linkDensity > 0.2 + linkDensityModifier {
                     haveToRemove = true
                 } else if weight >= 25 && linkDensity > 0.5 + linkDensityModifier {
                     haveToRemove = true
@@ -1652,6 +1654,159 @@ final class ArticleGrabber: ProcessorBase {
             }
             return false
         }
+    }
+
+    private let actionComponentPattern = try! NSRegularExpression(
+        pattern: "(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*",
+        options: [.caseInsensitive]
+    )
+    private let subscriptionComponentPattern = try! NSRegularExpression(
+        pattern: "(paid|subscribe|register|login)",
+        options: [.caseInsensitive]
+    )
+    private let relatedSectionHeadingPattern = try! NSRegularExpression(
+        pattern: "(related|recommended|関連記事|関連トピック|ジャンル)",
+        options: [.caseInsensitive]
+    )
+    private let prLabelPattern = try! NSRegularExpression(
+        pattern: #"^\s*\[?\s*PR\s*\]?\s*$"#,
+        options: [.caseInsensitive]
+    )
+
+    private func cleanArticleChrome(articleContent: Element, linkDensityCache: LinkDensityCache) {
+        removeNodes(in: articleContent, tagName: "ul") { list in
+            self.isArticleActionList(list)
+        }
+
+        removeNodes(in: articleContent, tagName: "div") { node in
+            if self.isCompactNonPrintOrAdNode(node) { return true }
+            if self.isCompactRelatedSection(node, linkDensityCache: linkDensityCache) { return true }
+            return false
+        }
+
+        removeNodes(in: articleContent, tagName: "section") { node in
+            self.isCompactRelatedSection(node, linkDensityCache: linkDensityCache)
+        }
+
+        removeNodes(in: articleContent, tagName: "p") { paragraph in
+            self.isPRLabel(paragraph)
+        }
+
+        removeCompactComponentContainers(
+            in: articleContent,
+            componentPattern: subscriptionComponentPattern,
+            maximumTextLength: 500
+        )
+    }
+
+    private func isArticleActionList(_ list: Element) -> Bool {
+        let dataContentType = list.attrOrEmpty("data-content-type")
+        let componentText = componentNames(in: list).joined(separator: " ")
+        let text = getInnerText(list, regEx: regEx)
+        let hasActionComponent = matches(actionComponentPattern, in: componentText)
+        let hasActionText = text.contains("印刷") ||
+            text.range(of: "share", options: .caseInsensitive) != nil ||
+            text.contains("シェア") ||
+            text.range(of: "facebook", options: .caseInsensitive) != nil ||
+            text.range(of: "twitter", options: .caseInsensitive) != nil
+
+        if dataContentType.caseInsensitiveCompare("Article") == .orderedSame,
+           hasActionComponent || hasActionText {
+            return true
+        }
+        if hasActionComponent, text.count < 300 {
+            return true
+        }
+        return false
+    }
+
+    private func isCompactNonPrintOrAdNode(_ node: Element) -> Bool {
+        let matchString = node.classNameSafe() + " " + node.idSafe()
+        let lower = matchString.lowercased()
+        guard lower.contains("notprint") || lower.contains("admod") else { return false }
+        return getInnerText(node, regEx: regEx).count < 500
+    }
+
+    private func isCompactRelatedSection(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
+        let text = getInnerText(node, regEx: regEx)
+        guard text.count < 500 else { return false }
+        let headingText = ((try? node.select("h1, h2, h3, h4, h5, h6").array()) ?? [])
+            .map { getInnerText($0, regEx: regEx) }
+            .joined(separator: " ")
+        guard matches(relatedSectionHeadingPattern, in: headingText) else { return false }
+        let linkDensity = getLinkDensity(element: node, textLength: text.count, cache: linkDensityCache)
+        return linkDensity > 0.15 || ((try? node.select("a").count) ?? 0) > 0
+    }
+
+    private func isPRLabel(_ paragraph: Element) -> Bool {
+        let text = getInnerText(paragraph, regEx: regEx)
+        return matches(prLabelPattern, in: text)
+    }
+
+    private func removeCompactComponentContainers(in articleContent: Element,
+                                                  componentPattern: NSRegularExpression,
+                                                  maximumTextLength: Int) {
+        let components = elements(in: articleContent).filter {
+            matches(componentPattern, in: $0.attrOrEmpty("x-component-name"))
+        }
+        for component in components {
+            var candidate: Element?
+            var current: Element? = component
+            while let element = current, element !== articleContent {
+                let tagName = element.tagNameUTF8()
+                if tagName == ReadabilityUTF8Arrays.div ||
+                    tagName == ReadabilityUTF8Arrays.section ||
+                    tagName == "aside".utf8Array {
+                    let textLength = getInnerText(element, regEx: regEx).count
+                    if textLength <= maximumTextLength {
+                        candidate = element
+                    }
+                }
+                current = element.parent()
+            }
+            if let candidate, candidate.parent() != nil {
+                printAndRemove(node: candidate, reason: "compact component chrome")
+            }
+        }
+    }
+
+    private func componentNames(in element: Element) -> [String] {
+        elements(in: element).compactMap { node in
+            let value = node.attrOrEmpty("x-component-name")
+            return value.isEmpty ? nil : value
+        }
+    }
+
+    private func elements(in element: Element) -> [Element] {
+        var result: [Element] = []
+        var stack = [element]
+        while let current = stack.popLast() {
+            result.append(current)
+            let children = current.children()
+            for child in children.reversed() {
+                stack.append(child)
+            }
+        }
+        return result
+    }
+
+    private func matches(_ regex: NSRegularExpression, in text: String) -> Bool {
+        regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) != nil
+    }
+
+    private func hasSignificantMediaContent(in node: Element, imgCount: Int) -> Bool {
+        guard imgCount > 0 else { return false }
+        let figureCount = (try? node.select("figure").count) ?? 0
+        let pictureCount = (try? node.select("picture").count) ?? 0
+        guard figureCount + pictureCount == 1 else { return false }
+        if ((try? node.select("h1, h2, h3, h4, h5, h6").count) ?? 0) > 0 {
+            return false
+        }
+        if ((try? node.select("iframe, object, embed, input, button, select, textarea").count) ?? 0) > 0 {
+            return false
+        }
+        let text = getInnerText(node, regEx: regEx)
+        return text.count < 500
     }
 
     private func hasAncestorTag(node: Element, tagName: [UInt8], maxDepth: Int = 3, filterFn: ((Element) -> Bool)? = nil) -> Bool {

@@ -79,39 +79,44 @@ Ported against `@mozilla/readability` **v0.6.0** (Readability.js) to keep behavi
 Run all tests:
 
 ```
-swift test -q -Xswiftc -suppress-warnings
+mise run test:parity
 ```
+
+If mise has not trusted this package config yet, run `mise trust` in this
+directory first. From the app repository root, `mise run test:readability-parity`
+runs the same parity suite without requiring the submodule config to be trusted.
 
 Filter fixtures:
 
 ```
-SWIFT_READABILITY_FIXTURES=nytimes-3 swift test -q -Xswiftc -suppress-warnings
+SWIFT_READABILITY_FIXTURES=nytimes-3 mise run test:parity
 ```
 
-Run the JavaScript Readability fixture parity suite:
+Run only the Swift suite:
 
 ```
-npm --prefix Tests/JavaScript install
-npm --prefix Tests/JavaScript test
+mise run test:swift
 ```
 
-The JavaScript suite uses `Sources/SwiftReadability/Resources/Readability.js`.
-By default it runs the validated fixtures listed in `Tests/JavaScript/fixtures.txt`.
-`SWIFT_READABILITY_FIXTURES` and `SWIFT_READABILITY_FIXTURE_REGEX` can be used to
-run specific fixtures from the shared Mozilla-format corpus.
-
-Run the full passing JavaScript corpus:
+Run only the JavaScript parity suite:
 
 ```
-SWIFT_READABILITY_FIXTURE_REGEX='.*' npm --prefix Tests/JavaScript test
+mise run test:javascript
 ```
 
-Known JS-vs-Swift fixture divergences are listed in
-`Tests/JavaScript/known-failures.txt` and are skipped by default. Include them
-for parity investigation with:
+The JavaScript suite uses `Sources/SwiftReadability/Resources/Readability.js`
+and `Sources/SwiftReadability/Resources/Readability-readerable.js`. Both Swift
+and JavaScript read `Tests/SwiftReadabilityTests/Fixtures/readability-suite.json`
+for shared fixture settings. `SWIFT_READABILITY_FIXTURES` and
+`SWIFT_READABILITY_FIXTURE_REGEX` can be used to run specific fixtures from the
+shared Mozilla-format corpus.
+
+Known JS-vs-Swift fixture divergences are listed in the shared manifest and are
+skipped by default for the affected runner. Include them for parity investigation
+with:
 
 ```
-SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES=1 SWIFT_READABILITY_FIXTURE_REGEX='.*' npm --prefix Tests/JavaScript test
+SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES=1 SWIFT_READABILITY_FIXTURE_REGEX='.*' mise run test:javascript
 ```
 
 ## Benchmark

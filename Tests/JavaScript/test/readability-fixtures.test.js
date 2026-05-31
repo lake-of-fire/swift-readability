@@ -8,26 +8,31 @@ const prettyPrint = require("js-beautify").html;
 const xmlNameValidator = require("xml-name-validator").name;
 
 const Readability = require("../../../Sources/SwiftReadability/Resources/Readability");
+const isProbablyReaderable = require("../../../Sources/SwiftReadability/Resources/Readability-readerable");
 
 const fixtureRoot = path.resolve(
   __dirname,
   "../../SwiftReadabilityTests/Fixtures/test-pages"
 );
+const manifestPath = path.resolve(
+  __dirname,
+  "../../SwiftReadabilityTests/Fixtures/readability-suite.json"
+);
 const quietVirtualConsole = new VirtualConsole();
 
+function fixtureManifest() {
+  return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+}
+
 function selectedFixtureNames() {
+  const manifest = fixtureManifest();
   const value = process.env.SWIFT_READABILITY_FIXTURES;
   if (!value && process.env.SWIFT_READABILITY_FIXTURE_REGEX) {
     return null;
   }
   if (!value) {
-    return new Set(
-      fs
-        .readFileSync(path.resolve(__dirname, "../fixtures.txt"), "utf8")
-        .split(/\r?\n/)
-        .map(name => name.trim())
-        .filter(Boolean)
-    );
+    const defaults = manifest.defaultFixtureSelection?.javascript;
+    return defaults?.length ? new Set(defaults) : null;
   }
   return new Set(
     value
@@ -41,12 +46,13 @@ function knownFailureNames() {
   if (process.env.SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES) {
     return new Set();
   }
+  const manifest = fixtureManifest();
   return new Set(
-    fs
-      .readFileSync(path.resolve(__dirname, "../known-failures.txt"), "utf8")
-      .split(/\r?\n/)
-      .map(name => name.trim())
-      .filter(Boolean)
+    (manifest.knownFailures || [])
+      .filter(failure =>
+        failure.runners?.includes("javascript") || failure.runners?.includes("*")
+      )
+      .map(failure => failure.name)
   );
 }
 
@@ -82,6 +88,7 @@ function loadFixtures() {
         expectedMetadata: fs.existsSync(metadataPath)
           ? JSON.parse(fs.readFileSync(metadataPath, "utf8"))
           : null,
+        assertions: fixtureManifest().assertions?.[name] || null,
       };
     })
     .filter(Boolean);
@@ -190,10 +197,18 @@ describe("Readability.js fixture parity", function () {
 
   for (const fixture of loadFixtures()) {
     it(`parses ${fixture.name}`, function () {
+      const baseURL = fixtureManifest().baseURL || "http://fakehost/test/page.html";
       const dom = new JSDOM(fixture.source, {
-        url: "http://fakehost/test/page.html",
+        url: baseURL,
         virtualConsole: quietVirtualConsole,
       });
+
+      if (fixture.expectedMetadata?.readerable != null) {
+        expect(isProbablyReaderable(dom.window.document)).to.equal(
+          fixture.expectedMetadata.readerable
+        );
+      }
+
       const result = new Readability(dom.window.document, {
         classesToPreserve: ["caption"],
       }).parse();
@@ -211,6 +226,15 @@ describe("Readability.js fixture parity", function () {
           result.publishedTime,
           fixture.expectedMetadata.publishedTime
         );
+      }
+
+      if (fixture.assertions) {
+        for (const excludedText of fixture.assertions.textExcludes || []) {
+          expect(result.textContent).not.to.include(excludedText);
+        }
+        for (const includedContent of fixture.assertions.contentIncludes || []) {
+          expect(result.content).to.include(includedContent);
+        }
       }
 
       if (fixture.expectedHTML) {

@@ -34,7 +34,7 @@ public struct ReadabilitySerializedResult<Content> {
 /// Public façade mirroring Mozilla Readability, backed by the Swift port of readability4j (Jsoup-based).
 public final class Readability {
     private static let unlikelyCandidatesRegex = try! NSRegularExpression(
-        pattern: "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
+        pattern: "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
         options: [.caseInsensitive]
     )
     private static let okMaybeItsACandidateRegex = try! NSRegularExpression(

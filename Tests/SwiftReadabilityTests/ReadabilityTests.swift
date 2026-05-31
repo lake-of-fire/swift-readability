@@ -39,6 +39,14 @@ struct ReadabilityTests {
                 #expect(result.readerable == readerable)
             }
         }
+        if let assertions = fixture.assertions {
+            for excludedText in assertions.textExcludes ?? [] {
+                #expect(!result.textContent.contains(excludedText), "Fixture \(fixture.name) should not include text \(excludedText)")
+            }
+            for includedContent in assertions.contentIncludes ?? [] {
+                #expect(result.content.contains(includedContent), "Fixture \(fixture.name) should include content \(includedContent)")
+            }
+        }
 
         if let expectedHTML = fixture.expectedHTML {
             // Mozilla's test suite runs js-beautify over both actual and expected HTML
@@ -73,18 +81,70 @@ struct ReadabilityTests {
 
 // MARK: - Fixture loading
 
+struct FixtureSuiteManifest: Decodable {
+    struct DefaultFixtureSelection: Decodable {
+        let swift: [String]?
+        let javascript: [String]?
+    }
+
+    struct KnownFailure: Decodable {
+        let name: String
+        let runners: [String]
+        let reason: String?
+    }
+
+    struct FixtureAssertions: Decodable, Sendable {
+        let textExcludes: [String]?
+        let contentIncludes: [String]?
+    }
+
+    let baseURL: URL?
+    let defaultFixtureSelection: DefaultFixtureSelection?
+    let assertions: [String: FixtureAssertions]?
+    let knownFailures: [KnownFailure]
+
+    static let fallbackBaseURL = URL(string: "http://fakehost/test/page.html")!
+
+    static func load(relativeTo sourceFile: StaticString = #filePath) -> FixtureSuiteManifest {
+        let fileURL = URL(fileURLWithPath: "\(sourceFile)")
+        let manifestURL = fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/readability-suite.json")
+
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(FixtureSuiteManifest.self, from: data) else {
+            return FixtureSuiteManifest(
+                baseURL: fallbackBaseURL,
+                defaultFixtureSelection: nil,
+                assertions: nil,
+                knownFailures: []
+            )
+        }
+        return manifest
+    }
+
+    func knownFailureNames(for runner: String) -> Set<String> {
+        Set(knownFailures.compactMap { failure in
+            guard failure.runners.contains(runner) || failure.runners.contains("*") else { return nil }
+            return failure.name
+        })
+    }
+}
+
 struct Fixture: Sendable, CustomStringConvertible {
     let name: String
     let url: URL
     let source: String
     let expectedHTML: String?
     let expectedMetadata: ReadabilityTests.ExpectedMetadata?
+    let assertions: FixtureSuiteManifest.FixtureAssertions?
 
     var description: String { "Fixture(\(name))" }
 }
 
 func loadFixtures() -> [Fixture] {
     let environment = ProcessInfo.processInfo.environment
+    let manifest = FixtureSuiteManifest.load()
     let selectedFixtures: Set<String>? = environment["SWIFT_READABILITY_FIXTURES"]
         .map { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
         .map { Set($0.filter { !$0.isEmpty }) }
@@ -107,7 +167,7 @@ func loadFixtures() -> [Fixture] {
         return []
     }
 
-    let basePageURL = URL(string: "http://fakehost/test/page.html")!
+    let basePageURL = manifest.baseURL ?? FixtureSuiteManifest.fallbackBaseURL
     var fixtures: [Fixture] = []
     for case let folderURL as URL in enumerator {
         let values = try? folderURL.resourceValues(forKeys: [.isDirectoryKey])
@@ -132,7 +192,8 @@ func loadFixtures() -> [Fixture] {
             url: basePageURL,
             source: source.trimmingCharacters(in: .whitespacesAndNewlines),
             expectedHTML: expectedHTML?.trimmingCharacters(in: .whitespacesAndNewlines),
-            expectedMetadata: expectedMetadata
+            expectedMetadata: expectedMetadata,
+            assertions: manifest.assertions?[folderURL.lastPathComponent]
         ))
     }
 
@@ -144,6 +205,12 @@ func loadFixtures() -> [Fixture] {
         fixtures = fixtures.filter {
             let range = NSRange(location: 0, length: $0.name.utf16.count)
             return fixtureRegex.firstMatch(in: $0.name, options: [], range: range) != nil
+        }
+    }
+    if environment["SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES"] != "1" {
+        let knownFailures = manifest.knownFailureNames(for: "swift")
+        if !knownFailures.isEmpty {
+            fixtures = fixtures.filter { !knownFailures.contains($0.name) }
         }
     }
     return fixtures
