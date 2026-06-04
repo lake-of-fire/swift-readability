@@ -410,16 +410,10 @@ final class MetadataParser: ProcessorBase {
     }
 
     private func tokenize(_ text: String) -> [String] {
-        // JS: .split(/\W+/).filter(Boolean), where \w is ASCII [A-Za-z0-9_]
         var tokens: [String] = []
         var current = ""
         for scalar in text.unicodeScalars {
-            let v = scalar.value
-            let isWord =
-                (v >= 48 && v <= 57) || // 0-9
-                (v >= 65 && v <= 90) || // A-Z
-                (v >= 97 && v <= 122) || // a-z
-                (v == 95) // _
+            let isWord = CharacterSet.alphanumerics.contains(scalar) || scalar.value == 95
             if isWord {
                 current.unicodeScalars.append(scalar)
             } else if !current.isEmpty {

@@ -672,12 +672,7 @@ final class ArticleGrabber: ProcessorBase {
             current.reserveCapacity(text.count)
 
             for scalar in text.unicodeScalars {
-                let v = scalar.value
-                let isWordChar =
-                    (v >= 48 && v <= 57) || // 0-9
-                    (v >= 65 && v <= 90) || // A-Z
-                    (v >= 97 && v <= 122) || // a-z
-                    v == 95 // _
+                let isWordChar = CharacterSet.alphanumerics.contains(scalar) || scalar.value == 95
                 if isWordChar {
                     current.append(Character(scalar))
                 } else if !current.isEmpty {
@@ -1216,7 +1211,7 @@ final class ArticleGrabber: ProcessorBase {
                 return self.isTextLengthLessThan(text, shareElementThreshold)
             }
         }
-        cleanArticleChrome(articleContent: articleContent, linkDensityCache: linkDensityCache)
+        cleanArticleChrome(articleContent: articleContent, metadata: metadata, linkDensityCache: linkDensityCache)
 
         if let timing {
             _ = timing.measure("grab.clean.iframe") { clean(e: articleContent, tag: "iframe") }
@@ -1227,7 +1222,7 @@ final class ArticleGrabber: ProcessorBase {
             _ = timing.measure("grab.cleanHeaders") { cleanHeaders(e: articleContent, options: options) }
             _ = timing.measure("grab.cleanConditionally.table") { cleanConditionally(e: articleContent, tag: "table", options: options, timing: timing, linkDensityCache: linkDensityCache) }
             _ = timing.measure("grab.cleanConditionally.ul") { cleanConditionally(e: articleContent, tag: "ul", options: options, timing: timing, linkDensityCache: linkDensityCache) }
-            _ = timing.measure("grab.cleanConditionally.div") { cleanConditionally(e: articleContent, tag: "div", options: options, timing: timing, linkDensityCache: linkDensityCache) }
+            _ = timing.measure("grab.cleanConditionally.div") { cleanConditionally(e: articleContent, tag: "div", options: options, metadata: metadata, timing: timing, linkDensityCache: linkDensityCache) }
         } else {
             clean(e: articleContent, tag: "iframe")
             clean(e: articleContent, tag: "input")
@@ -1237,7 +1232,7 @@ final class ArticleGrabber: ProcessorBase {
             cleanHeaders(e: articleContent, options: options)
             cleanConditionally(e: articleContent, tag: "table", options: options, linkDensityCache: linkDensityCache)
             cleanConditionally(e: articleContent, tag: "ul", options: options, linkDensityCache: linkDensityCache)
-            cleanConditionally(e: articleContent, tag: "div", options: options, linkDensityCache: linkDensityCache)
+            cleanConditionally(e: articleContent, tag: "div", options: options, metadata: metadata, linkDensityCache: linkDensityCache)
         }
 
         // Replace H1 with H2 as H1 should be only title that is displayed separately.
@@ -1506,6 +1501,7 @@ final class ArticleGrabber: ProcessorBase {
     private func cleanConditionally(e: Element,
                                     tag: String,
                                     options: ArticleGrabberOptions,
+                                    metadata: ArticleMetadata? = nil,
                                     timing: TimingSink? = nil,
                                     linkDensityCache: LinkDensityCache) {
         if options.cleanConditionally == false { return }
@@ -1602,6 +1598,16 @@ final class ArticleGrabber: ProcessorBase {
                     timing: timing,
                     cache: linkDensityCache
                 )
+                if self.shouldPreserveLikelyArticleBody(
+                    node,
+                    tag: tag,
+                    paragraphCount: p,
+                    innerText: innerText,
+                    linkDensity: linkDensity,
+                    metadata: metadata
+                ) {
+                    return false
+                }
                 let innerTextRange = NSRange(location: 0, length: innerText.utf16.count)
                 if self.adWordsPattern.firstMatch(in: innerText, options: [], range: innerTextRange) != nil ||
                    self.loadingWordsPattern.firstMatch(in: innerText, options: [], range: innerTextRange) != nil {
@@ -1656,12 +1662,47 @@ final class ArticleGrabber: ProcessorBase {
         }
     }
 
+    private func shouldPreserveLikelyArticleBody(_ node: Element,
+                                                 tag: String,
+                                                 paragraphCount: Int,
+                                                 innerText: String,
+                                                 linkDensity: Double,
+                                                 metadata: ArticleMetadata?) -> Bool {
+        guard tag == "div" else { return false }
+        guard paragraphCount >= 2, innerText.count >= 120, linkDensity < 0.35 else { return false }
+        if let excerpt = metadata?.excerpt, excerptHasSubstantialOverlap(excerpt, in: innerText) {
+            return true
+        }
+        if paragraphCount >= 3, innerText.count >= ReadabilityOptions.defaultCharThreshold {
+            return true
+        }
+        return false
+    }
+
+    private func excerptHasSubstantialOverlap(_ excerpt: String, in text: String) -> Bool {
+        let excerptText = compactedComparableText(excerpt)
+        let bodyText = compactedComparableText(text)
+        guard excerptText.count >= 40 else { return false }
+        let prefixLength = min(excerptText.count, 80)
+        let prefix = String(excerptText.prefix(prefixLength))
+        return bodyText.contains(prefix)
+    }
+
+    private func compactedComparableText(_ text: String) -> String {
+        String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) })
+            .lowercased()
+    }
+
     private let actionComponentPattern = try! NSRegularExpression(
         pattern: "(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*",
         options: [.caseInsensitive]
     )
     private let subscriptionComponentPattern = try! NSRegularExpression(
         pattern: "(paid|subscribe|register|login)",
+        options: [.caseInsensitive]
+    )
+    private let profileComponentPattern = try! NSRegularExpression(
+        pattern: "(writer|author)\\s*profile",
         options: [.caseInsensitive]
     )
     private let relatedSectionHeadingPattern = try! NSRegularExpression(
@@ -1673,7 +1714,11 @@ final class ArticleGrabber: ProcessorBase {
         options: [.caseInsensitive]
     )
 
-    private func cleanArticleChrome(articleContent: Element, linkDensityCache: LinkDensityCache) {
+    private func cleanArticleChrome(articleContent: Element,
+                                    metadata: ArticleMetadata,
+                                    linkDensityCache: LinkDensityCache) {
+        removeDuplicateTitleChrome(articleContent: articleContent, metadata: metadata)
+
         removeNodes(in: articleContent, tagName: "ul") { list in
             self.isArticleActionList(list)
         }
@@ -1697,6 +1742,29 @@ final class ArticleGrabber: ProcessorBase {
             componentPattern: subscriptionComponentPattern,
             maximumTextLength: 500
         )
+        removeCompactComponentContainers(
+            in: articleContent,
+            componentPattern: profileComponentPattern,
+            maximumTextLength: 800
+        )
+    }
+
+    private func removeDuplicateTitleChrome(articleContent: Element, metadata: ArticleMetadata) {
+        guard let articleTitle = metadata.title, !articleTitle.isEmpty else { return }
+
+        removeNodes(in: articleContent, tagName: "div") { node in
+            if node === articleContent { return false }
+            guard self.getInnerText(node, regEx: self.regEx).count < 350 else { return false }
+            guard let headings = try? node.select("h1, h2"), !headings.isEmpty else { return false }
+            return headings.contains { self.headerDuplicatesTitle(node: $0, articleTitle: articleTitle) }
+        }
+
+        removeNodes(in: articleContent, tagName: "h1") { heading in
+            self.headerDuplicatesTitle(node: heading, articleTitle: articleTitle)
+        }
+        removeNodes(in: articleContent, tagName: "h2") { heading in
+            self.headerDuplicatesTitle(node: heading, articleTitle: articleTitle)
+        }
     }
 
     private func isArticleActionList(_ list: Element) -> Bool {
