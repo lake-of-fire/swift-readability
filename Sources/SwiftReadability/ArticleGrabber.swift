@@ -1241,6 +1241,7 @@ final class ArticleGrabber: ProcessorBase {
                 _ = try? h1.tagName("h2")
             }
         }
+        removeLeadingCompactTextChrome(from: articleContent)
 
         removeNodes(in: articleContent, tagName: "p") { paragraph in
             let imgCount = (try? paragraph.getElementsByTag("img").count) ?? 0
@@ -1725,6 +1726,7 @@ final class ArticleGrabber: ProcessorBase {
 
         removeNodes(in: articleContent, tagName: "div") { node in
             if self.isCompactNonPrintOrAdNode(node) { return true }
+            if self.isCompactStandaloneBylineChrome(node) { return true }
             if self.isCompactRelatedSection(node, linkDensityCache: linkDensityCache) { return true }
             return false
         }
@@ -1734,7 +1736,7 @@ final class ArticleGrabber: ProcessorBase {
         }
 
         removeNodes(in: articleContent, tagName: "p") { paragraph in
-            self.isPRLabel(paragraph)
+            self.isPRLabel(paragraph) || self.isCompactStandaloneBylineParagraph(paragraph)
         }
 
         removeCompactComponentContainers(
@@ -1793,6 +1795,64 @@ final class ArticleGrabber: ProcessorBase {
         let lower = matchString.lowercased()
         guard lower.contains("notprint") || lower.contains("admod") else { return false }
         return getInnerText(node, regEx: regEx).count < 500
+    }
+
+    private func isCompactStandaloneBylineChrome(_ node: Element) -> Bool {
+        let text = getInnerText(node, regEx: regEx)
+        guard !text.isEmpty, text.count <= 100 else { return false }
+        if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
+        if ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) > 0 {
+            return false
+        }
+        let paragraphCount = (try? node.select("p").count) ?? 0
+        guard paragraphCount <= 2 else { return false }
+        return hasFollowingArticleBody(after: node)
+    }
+
+    private func isCompactStandaloneBylineParagraph(_ paragraph: Element) -> Bool {
+        guard let parent = paragraph.parent() else { return false }
+        let parentText = getInnerText(parent, regEx: regEx)
+        guard parentText == getInnerText(paragraph, regEx: regEx) else { return false }
+        return isCompactStandaloneBylineChrome(parent)
+    }
+
+    private func removeLeadingCompactTextChrome(from articleContent: Element) {
+        var current: Element? = articleContent
+        while let container = current, let firstChild = container.children().firstSafe {
+            if isCompactTextOnlyChrome(firstChild) {
+                printAndRemove(node: firstChild, reason: "leading compact text chrome")
+                continue
+            }
+            guard firstChild.children().count > 0 else { break }
+            current = firstChild
+        }
+    }
+
+    private func isCompactTextOnlyChrome(_ node: Element) -> Bool {
+        let text = getInnerText(node, regEx: regEx)
+        guard !text.isEmpty, text.count <= 100 else { return false }
+        if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
+        return ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) == 0
+    }
+
+    private func hasFollowingArticleBody(after node: Element) -> Bool {
+        var current: Element? = node
+        while let element = current, let parent = element.parent() {
+            var sibling = try? element.nextElementSibling()
+            while let candidate = sibling {
+                let text = getInnerText(candidate, regEx: regEx)
+                let hasMedia = ((try? candidate.select("img, figure, picture").count) ?? 0) > 0
+                if text.count >= 300 || (hasMedia && text.count >= 80) {
+                    return true
+                }
+                if text.count > 100 || hasMedia {
+                    return false
+                }
+                sibling = try? candidate.nextElementSibling()
+            }
+            current = parent
+        }
+        return false
     }
 
     private func isCompactRelatedSection(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
