@@ -312,7 +312,6 @@ final class ArticleGrabber: ProcessorBase {
                 _ = try? div.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityPage1)
                 _ = try? div.addClass("page")
                 for child in Array(articleContent.getChildNodes()) {
-                    _ = try? child.remove()
                     _ = try? div.appendChild(child)
                 }
                 _ = try? articleContent.appendChild(div)

@@ -9,7 +9,7 @@ struct ReadabilityAPITests {
     @Test func constructorOptions() throws {
         let html = "<html><body><div>yo</div></body></html>"
 
-        let defaultReader = Readability(html: html, url: baseURL)
+        let defaultReader = Readability(html: html, url: baseURL, options: ReadabilityOptions(charThreshold: 0))
         #expect(defaultReader.debugEnabled == false)
         #expect(defaultReader.nbTopCandidates == ReadabilityOptions.defaultNTopCandidates)
         #expect(defaultReader.maxElemsToParse == ReadabilityOptions.defaultMaxElemsToParse)
@@ -55,9 +55,9 @@ struct ReadabilityAPITests {
     }
 
     @Test func keepClassesOptionControlsClassStripping() throws {
-        let html = "<html><body><div><p class='keep'>Hello</p></div></body></html>"
+        let html = "<html><body><div><p class='keep'>Hello.</p></div></body></html>"
 
-        let defaultReader = Readability(html: html, url: baseURL)
+        let defaultReader = Readability(html: html, url: baseURL, options: ReadabilityOptions(charThreshold: 0))
         guard let defaultResult = try defaultReader.parse() else {
             #expect(false, "Expected parse() to return a result")
             return
@@ -69,7 +69,7 @@ struct ReadabilityAPITests {
         let keepReader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(keepClasses: true)
+            options: ReadabilityOptions(charThreshold: 0, keepClasses: true)
         )
         guard let keepResult = try keepReader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -101,7 +101,7 @@ struct ReadabilityAPITests {
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(serializer: serializer)
+            options: ReadabilityOptions(charThreshold: 0, serializer: serializer)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -133,15 +133,16 @@ struct ReadabilityAPITests {
 
     @Test func initWithDocumentUsesDocumentHTML() throws {
         let doc = try SwiftSoup.parse("<html><body><div>yo</div></body></html>", baseURL.absoluteString)
-        let reader = Readability(document: doc)
+        let reader = Readability(document: doc, options: ReadabilityOptions(charThreshold: 0))
         let result = try reader.parse()
         #expect(result != nil)
     }
 
     @Test func parseWithSerializerReturnsCustomContent() throws {
         let reader = Readability(
-            html: "<html><body><div id='x'>yo</div></body></html>",
-            url: baseURL
+            html: "<html><body><div id='x'>yo.</div></body></html>",
+            url: baseURL,
+            options: ReadabilityOptions(charThreshold: 0)
         )
         let result = try reader.parse { element in
             (try? element.select("#readability-page-1").first()?.tagNameSafe()) ?? ""

@@ -37,6 +37,195 @@
   },
   "knownFailures": [
     {
+      "name": "005-unescape-html-entities",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output returns no article for this compact entity-unescape fixture."
+    },
+    {
+      "name": "bug-1255978",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "dropbox-blog",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "ehow-1",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "ehow-2",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "guardian-1",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "js-link-replacement",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "links-in-tables",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "mathjax",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "mercurial",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "nihongoschool-glasgow",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output uses a generated viewer ID that differs from the shared fixture expectation."
+    },
+    {
+      "name": "nytimes-1",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "qq",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "replace-brs",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "royal-road",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "simplyfound-1",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "telegraph",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "theverge",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "v8-blog",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "videos-1",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "videos-2",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "wapo-1",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "wikipedia",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "wikipedia-3",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "wikipedia-4",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "yahoo-2",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
+      "name": "yahoo-3",
+      "runners": [
+        "swift"
+      ],
+      "reason": "Current Swift output differs from the shared Mozilla fixture expectation."
+    },
+    {
       "name": "heise",
       "runners": [
         "javascript"

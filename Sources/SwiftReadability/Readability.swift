@@ -481,6 +481,7 @@ private extension Readability {
             outputSettings.prettyPrint(pretty: false)
             outputSettings.syntax(syntax: .html)
             _ = try? serializationDoc.body()?.appendChild(articleContent)
+            collapseBooleanAttributesForHTML(in: articleContent)
             return (try? articleContent.html()) ?? ""
         }
 
@@ -491,11 +492,54 @@ private extension Readability {
         outputSettings.syntax(syntax: effectiveUseXMLSerializer ? .xml : .html)
         if effectiveUseXMLSerializer {
             normalizeBooleanAttributes(in: articleContent, sourceHTML: sourceHTML, explicitBooleanAttrs: explicitBooleanAttrs)
+        } else {
+            collapseBooleanAttributesForHTML(in: articleContent)
         }
         let html = (try? articleContent.html()) ?? ""
         outputSettings.prettyPrint(pretty: originalPrettyPrint)
         outputSettings.syntax(syntax: originalSyntax)
         return html
+    }
+
+    func collapseBooleanAttributesForHTML(in root: Element) {
+        let booleanAttrs: Set<String> = [
+            "allowfullscreen",
+            "async",
+            "autofocus",
+            "autoplay",
+            "checked",
+            "controls",
+            "default",
+            "defer",
+            "disabled",
+            "formnovalidate",
+            "hidden",
+            "ismap",
+            "itemscope",
+            "loop",
+            "multiple",
+            "muted",
+            "novalidate",
+            "open",
+            "playsinline",
+            "readonly",
+            "required",
+            "reversed",
+            "selected",
+            "typemustmatch"
+        ]
+
+        guard let elements = try? root.getAllElements() else { return }
+        for element in elements {
+            guard let attributes = element.getAttributes()?.asList() else { continue }
+            for attr in attributes {
+                let attrNameLower = String(decoding: attr.getKeyUTF8(), as: UTF8.self).lowercased()
+                guard booleanAttrs.contains(attrNameLower) else { continue }
+                let value = String(decoding: attr.getValueUTF8(), as: UTF8.self)
+                guard value.caseInsensitiveCompare(attrNameLower) == .orderedSame else { continue }
+                _ = try? element.attr(attr.getKey(), "")
+            }
+        }
     }
 
     func normalizeBooleanAttributes(in root: Element, sourceHTML: String, explicitBooleanAttrs: [String]) {

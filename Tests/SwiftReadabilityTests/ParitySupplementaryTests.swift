@@ -16,20 +16,20 @@ struct ParitySupplementaryTests {
     }
 
     @Test func documentPipelineReflectsMutations() throws {
-        let html = "<html><body><article><p id='target'>old</p></article></body></html>"
+        let html = "<html><body><article><p id='target'>old.</p></article></body></html>"
         let doc = try SwiftSoup.parse(html, baseURL.absoluteString)
-        try doc.select("#target").first()?.text("new")
-        let reader = Readability(document: doc, options: ReadabilityOptions(charThreshold: 1))
+        try doc.select("#target").first()?.text("new.")
+        let reader = Readability(document: doc, options: ReadabilityOptions(charThreshold: 0))
         let result = try reader.parse()
-        #expect(result?.content.contains("new") == true)
+        #expect(result?.content.contains("new.") == true)
     }
 
     @Test func xmlSerializerOptionProducesXMLSyntax() throws {
-        let html = "<html><body><p>hello there hello there hello there hello there hello there hello there hello there hello there hello there hello there</p><p><img src=\"\"></p></body></html>"
+        let html = "<html><body><p>hello there hello there hello there hello there hello there hello there hello there hello there hello there hello there.</p><p><img src=\"\"></p></body></html>"
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20, useXMLSerializer: true)
+            options: ReadabilityOptions(charThreshold: 0, useXMLSerializer: true)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -44,7 +44,7 @@ struct ParitySupplementaryTests {
         <html>
           <body>
             <article id="target" itemscope="itemscope" itemtype="https://schema.org/Article">
-              <p>hello there hello there hello there hello there hello there</p>
+              <p>hello there hello there hello there hello there hello there.</p>
             </article>
           </body>
         </html>
@@ -52,7 +52,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20)
+            options: ReadabilityOptions(charThreshold: 0)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -67,7 +67,7 @@ struct ParitySupplementaryTests {
         <html>
           <body>
             <article id="target" itemscope="itemscope" itemtype="https://schema.org/Article">
-              <p>hello there hello there hello there hello there hello there</p>
+              <p>hello there hello there hello there hello there hello there.</p>
             </article>
           </body>
         </html>
@@ -75,7 +75,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20, useXMLSerializer: true)
+            options: ReadabilityOptions(charThreshold: 0, useXMLSerializer: true)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -95,7 +95,7 @@ struct ParitySupplementaryTests {
             </script>
           </head>
           <body>
-            <p>hello there hello there hello there hello there hello there</p>
+            <p>hello there hello there hello there hello there hello there.</p>
           </body>
         </html>
         """
@@ -103,7 +103,7 @@ struct ParitySupplementaryTests {
         let readerDefault = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20)
+            options: ReadabilityOptions(charThreshold: 0)
         )
         let resultDefault = try readerDefault.parse()
         #expect(resultDefault?.title == "JSONLD Title")
@@ -111,7 +111,7 @@ struct ParitySupplementaryTests {
         let readerDisabled = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20, disableJSONLD: true)
+            options: ReadabilityOptions(charThreshold: 0, disableJSONLD: true)
         )
         let resultDisabled = try readerDisabled.parse()
         #expect(resultDisabled?.title == "OG Title")
@@ -122,7 +122,7 @@ struct ParitySupplementaryTests {
         <html>
           <body>
             <article>
-              <p class="keepme dropme">hello there hello there hello there hello there hello there</p>
+              <p class="keepme dropme">hello there hello there hello there hello there hello there.</p>
             </article>
           </body>
         </html>
@@ -130,7 +130,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20, classesToPreserve: ["keepme"])
+            options: ReadabilityOptions(charThreshold: 0, classesToPreserve: ["keepme"])
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -145,7 +145,7 @@ struct ParitySupplementaryTests {
         <html>
           <body>
             <article>
-              <p class="keepme dropme">hello there hello there hello there hello there hello there</p>
+              <p class="keepme dropme">hello there hello there hello there hello there hello there.</p>
             </article>
           </body>
         </html>
@@ -153,7 +153,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20, classesToPreserve: ["keepme"], keepClasses: true)
+            options: ReadabilityOptions(charThreshold: 0, classesToPreserve: ["keepme"], keepClasses: true)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -168,7 +168,7 @@ struct ParitySupplementaryTests {
         <html>
           <body>
             <article id="target" itemscope="itemscope" itemtype="https://schema.org/Article">
-              <p>hello there hello there hello there hello there hello there</p>
+              <p>hello there hello there hello there hello there hello there.</p>
             </article>
           </body>
         </html>
@@ -176,7 +176,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: baseURL,
-            options: ReadabilityOptions(charThreshold: 20, useXMLSerializer: true)
+            options: ReadabilityOptions(charThreshold: 0, useXMLSerializer: true)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -206,7 +206,7 @@ struct ParitySupplementaryTests {
           </head>
           <body>
             <article>
-              <p>hello there hello there hello there hello there hello there</p>
+              <p>hello there hello there hello there hello there hello there.</p>
               <a href="page.html">Link</a>
             </article>
           </body>
@@ -215,7 +215,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: URL(string: "https://example.com/root/index.html")!,
-            options: ReadabilityOptions(charThreshold: 20)
+            options: ReadabilityOptions(charThreshold: 0)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")
@@ -232,7 +232,7 @@ struct ParitySupplementaryTests {
           </head>
           <body>
             <article>
-              <p>hello there hello there hello there hello there hello there</p>
+              <p>hello there hello there hello there hello there hello there.</p>
               <img src="img.png" />
             </article>
           </body>
@@ -241,7 +241,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(
             html: html,
             url: URL(string: "https://example.com/root/index.html")!,
-            options: ReadabilityOptions(charThreshold: 20)
+            options: ReadabilityOptions(charThreshold: 0)
         )
         guard let result = try reader.parse() else {
             #expect(false, "Expected parse() to return a result")

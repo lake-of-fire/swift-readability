@@ -360,6 +360,8 @@ enum DOMComparator {
 // MARK: - Mozilla fixture formatting
 
 enum MozillaPrettyPrinter {
+    private static let dependencyInstallLock = NSLock()
+
     static func prettyPrint(_ html: String) throws -> String {
         // Match tmp-readability/test/utils.js prettyPrint() options exactly.
         let script = #"""
@@ -390,6 +392,7 @@ process.stdout.write(output);
         let javascriptTestCwd = repoRoot
             .appendingPathComponent("Tests", isDirectory: true)
             .appendingPathComponent("JavaScript", isDirectory: true)
+        try ensureJSBeautifyInstalled(in: javascriptTestCwd)
         let legacyNodeCwd = repoRoot.appendingPathComponent("tmp-readability", isDirectory: true)
         let nodeCwd = FileManager.default.fileExists(
             atPath: javascriptTestCwd.appendingPathComponent("node_modules/js-beautify").path
@@ -442,5 +445,41 @@ process.stdout.write(output);
         }
 
         return String(data: stdoutData, encoding: .utf8) ?? ""
+    }
+
+    private static func ensureJSBeautifyInstalled(in javascriptTestCwd: URL) throws {
+        let dependencyPath = javascriptTestCwd
+            .appendingPathComponent("node_modules", isDirectory: true)
+            .appendingPathComponent("js-beautify", isDirectory: true)
+            .path
+        guard !FileManager.default.fileExists(atPath: dependencyPath) else { return }
+
+        dependencyInstallLock.lock()
+        defer { dependencyInstallLock.unlock() }
+
+        guard !FileManager.default.fileExists(atPath: dependencyPath) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["npm", "ci", "--ignore-scripts"]
+        process.currentDirectoryURL = javascriptTestCwd
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "MozillaPrettyPrinter",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: "npm ci failed (\(process.terminationStatus)): \(stderrText)"]
+            )
+        }
     }
 }
