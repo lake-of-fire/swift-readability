@@ -1817,7 +1817,11 @@ final class ArticleGrabber: ProcessorBase {
 
     private func removeLeadingCompactTextChrome(from articleContent: Element) {
         var current: Element? = articleContent
+        var phrasingCache: [ObjectIdentifier: Bool] = [:]
         while let container = current, let firstChild = container.children().firstSafe {
+            if isPhrasingContent(firstChild, cache: &phrasingCache) {
+                break
+            }
             if isCompactTextOnlyChrome(firstChild) {
                 printAndRemove(node: firstChild, reason: "leading compact text chrome")
                 continue

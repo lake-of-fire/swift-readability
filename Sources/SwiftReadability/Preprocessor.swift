@@ -12,11 +12,30 @@ final class Preprocessor: ProcessorBase {
     /// Prepare the HTML document for readability to scrape it.
     func prepareDocument(_ document: Document) {
         unwrapNoscriptImages(document)
+        normalizeRuby(document)
         removeScripts(document)
         removeStyles(document)
         removeComments(document)
         replaceBrs(document, regEx: regEx)
         replaceNodes(in: document, tagName: "font", newTagName: "span")
+    }
+
+    private func normalizeRuby(_ document: Document) {
+        guard let rubyElements = try? document.getElementsByTag("ruby").array(), !rubyElements.isEmpty else {
+            return
+        }
+        for ruby in rubyElements {
+            if let rpElements = try? ruby.getElementsByTag("rp").array() {
+                for rp in rpElements {
+                    try? rp.remove()
+                }
+            }
+            if let rbElements = try? ruby.getElementsByTag("rb").array() {
+                for rb in rbElements {
+                    _ = try? rb.unwrap()
+                }
+            }
+        }
     }
 
     private func removeScripts(_ document: Document) {
