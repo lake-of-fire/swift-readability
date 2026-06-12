@@ -1240,7 +1240,7 @@ final class ArticleGrabber: ProcessorBase {
                 _ = try? h1.tagName("h2")
             }
         }
-        removeLeadingCompactTextChrome(from: articleContent)
+        removeLeadingCompactTextChrome(from: articleContent, linkDensityCache: linkDensityCache)
 
         removeNodes(in: articleContent, tagName: "p") { paragraph in
             let imgCount = (try? paragraph.getElementsByTag("img").count) ?? 0
@@ -1815,12 +1815,16 @@ final class ArticleGrabber: ProcessorBase {
         return isCompactStandaloneBylineChrome(parent)
     }
 
-    private func removeLeadingCompactTextChrome(from articleContent: Element) {
+    private func removeLeadingCompactTextChrome(from articleContent: Element, linkDensityCache: LinkDensityCache) {
         var current: Element? = articleContent
         var phrasingCache: [ObjectIdentifier: Bool] = [:]
         while let container = current, let firstChild = container.children().firstSafe {
             if isPhrasingContent(firstChild, cache: &phrasingCache) {
                 break
+            }
+            if isCompactMediaActionChrome(firstChild, linkDensityCache: linkDensityCache) {
+                printAndRemove(node: firstChild, reason: "leading compact media action chrome")
+                continue
             }
             if isCompactTextOnlyChrome(firstChild) {
                 printAndRemove(node: firstChild, reason: "leading compact text chrome")
@@ -1836,6 +1840,27 @@ final class ArticleGrabber: ProcessorBase {
         guard !text.isEmpty, text.count <= 100 else { return false }
         if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
         return ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) == 0
+    }
+
+    private func isCompactMediaActionChrome(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
+        let text = getInnerText(node, regEx: regEx)
+        guard text.count <= 250 else { return false }
+        let imageCount = (try? node.select("img").count) ?? 0
+        guard imageCount > 0, imageCount <= 4 else { return false }
+        if ((try? node.select("h1, h2, h3, h4, h5, h6, figure, picture, iframe, object, embed, input, button, select, textarea").count) ?? 0) > 0 {
+            return false
+        }
+        let linkCount = (try? node.select("a").count) ?? 0
+        let listCount = (try? node.select("ul, ol").count) ?? 0
+        let hasActionMarker = matches(actionComponentPattern, in: node.classNameSafe() + " " + node.idSafe())
+        guard linkCount > 0, listCount > 0 || hasActionMarker else {
+            return false
+        }
+        if text.count > 40 {
+            let linkDensity = getLinkDensity(element: node, textLength: text.count, cache: linkDensityCache)
+            guard linkDensity > 0.35 else { return false }
+        }
+        return hasFollowingArticleBody(after: node)
     }
 
     private func hasFollowingArticleBody(after node: Element) -> Bool {

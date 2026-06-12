@@ -33,6 +33,18 @@
         "AS20260511003970.jpg",
         "盗んだ高級車をバラバラにしてコンテナに入れ、中古車と偽って海外に密輸する手口が横行している"
       ]
+    },
+    "web-japan-niponica38-feature02": {
+      "contentExcludes": [
+        "ja_thumb.jpg",
+        "btn-pdf.png",
+        "no38_ja.pdf"
+      ],
+      "contentIncludes": [
+        "images/ja/niponica38/2-1.jpg",
+        "古来、日本人は宇宙を自然の延長と捉え",
+        "9世紀頃に成立した日本最古の物語文学"
+      ]
     }
   },
   "knownFailures": [

@@ -43,6 +43,9 @@ struct ReadabilityTests {
             for excludedText in assertions.textExcludes ?? [] {
                 #expect(!result.textContent.contains(excludedText), "Fixture \(fixture.name) should not include text \(excludedText)")
             }
+            for excludedContent in assertions.contentExcludes ?? [] {
+                #expect(!result.content.contains(excludedContent), "Fixture \(fixture.name) should not include content \(excludedContent)")
+            }
             for includedContent in assertions.contentIncludes ?? [] {
                 #expect(result.content.contains(includedContent), "Fixture \(fixture.name) should include content \(includedContent)")
             }
@@ -95,6 +98,7 @@ struct FixtureSuiteManifest: Decodable {
 
     struct FixtureAssertions: Decodable, Sendable {
         let textExcludes: [String]?
+        let contentExcludes: [String]?
         let contentIncludes: [String]?
     }
 

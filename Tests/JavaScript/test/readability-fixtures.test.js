@@ -232,6 +232,9 @@ describe("Readability.js fixture parity", function () {
         for (const excludedText of fixture.assertions.textExcludes || []) {
           expect(result.textContent).not.to.include(excludedText);
         }
+        for (const excludedContent of fixture.assertions.contentExcludes || []) {
+          expect(result.content).not.to.include(excludedContent);
+        }
         for (const includedContent of fixture.assertions.contentIncludes || []) {
           expect(result.content).to.include(includedContent);
         }

@@ -830,6 +830,7 @@ Readability.prototype = {
       this._getAllNodesWithTag(articleContent, ["h1"]),
       "h2"
     );
+    this._removeLeadingCompactChrome(articleContent);
 
     // Remove extra paragraphs
     this._removeNodes(
@@ -2711,6 +2712,92 @@ Readability.prototype = {
       return false;
     }
     return this._getLinkDensity(node) > 0.15 || node.getElementsByTagName("a").length > 0;
+  },
+
+  _removeLeadingCompactChrome(articleContent) {
+    var current = articleContent;
+    while (current && current.children.length) {
+      var firstChild = current.children[0];
+      if (this._isPhrasingContent(firstChild)) {
+        break;
+      }
+      if (this._isCompactMediaActionChrome(firstChild)) {
+        firstChild.remove();
+        continue;
+      }
+      if (!firstChild.children.length) {
+        break;
+      }
+      current = firstChild;
+    }
+  },
+
+  _isCompactMediaActionChrome(node) {
+    var text = this._getInnerText(node);
+    if (text.length > 250) {
+      return false;
+    }
+    var imageCount = node.getElementsByTagName("img").length;
+    if (imageCount === 0 || imageCount > 4) {
+      return false;
+    }
+    if (
+      this._getAllNodesWithTag(node, [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "figure",
+        "picture",
+        "iframe",
+        "object",
+        "embed",
+        "input",
+        "button",
+        "select",
+        "textarea",
+      ]).length > 0
+    ) {
+      return false;
+    }
+    var linkCount = node.getElementsByTagName("a").length;
+    var listCount =
+      node.getElementsByTagName("ul").length +
+      node.getElementsByTagName("ol").length;
+    var matchString = `${node.className || ""} ${node.id || ""}`;
+    var hasActionMarker = /(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*/i.test(matchString);
+    if (linkCount === 0 || (listCount === 0 && !hasActionMarker)) {
+      return false;
+    }
+    if (text.length > 40 && this._getLinkDensity(node) <= 0.35) {
+      return false;
+    }
+    return this._hasFollowingArticleBody(node);
+  },
+
+  _hasFollowingArticleBody(node) {
+    var current = node;
+    while (current && current.parentNode) {
+      var sibling = current.nextElementSibling;
+      while (sibling) {
+        var text = this._getInnerText(sibling);
+        var hasMedia =
+          sibling.getElementsByTagName("img").length > 0 ||
+          sibling.getElementsByTagName("figure").length > 0 ||
+          sibling.getElementsByTagName("picture").length > 0;
+        if (text.length >= 300 || (hasMedia && text.length >= 80)) {
+          return true;
+        }
+        if (text.length > 100 || hasMedia) {
+          return false;
+        }
+        sibling = sibling.nextElementSibling;
+      }
+      current = current.parentNode;
+    }
+    return false;
   },
 
   _removeCompactComponentContainers(articleContent, componentPattern, maximumTextLength) {
