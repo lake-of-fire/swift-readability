@@ -172,6 +172,8 @@ Readability.prototype = {
       /^(ad(vertising|vertisement)?|pub(licité)?|werb(ung)?|广告|Реклама|Anuncio)$/iu,
     loadingWords:
       /^((loading|正在加载|Загрузка|chargement|cargando)(…|\.\.\.)?)$/iu,
+    imageCarousel:
+      /carousel|slider|slideshow|swiper|flickity|splide|keen-slider|glide/i,
   },
 
   UNLIKELY_ROLES: [
@@ -1464,6 +1466,8 @@ Readability.prototype = {
               siblingScoreThreshold
           ) {
             append = true;
+          } else if (this._isReadabilityCarousel(sibling)) {
+            append = true;
           } else if (sibling.nodeName === "P") {
             var linkDensity = this._getLinkDensity(sibling);
             var nodeContent = this._getInnerText(sibling);
@@ -1485,7 +1489,10 @@ Readability.prototype = {
         if (append) {
           this.log("Appending node:", sibling);
 
-          if (!this.ALTER_TO_DIV_EXCEPTIONS.includes(sibling.nodeName)) {
+          if (
+            !this._isReadabilityCarousel(sibling) &&
+            !this.ALTER_TO_DIV_EXCEPTIONS.includes(sibling.nodeName)
+          ) {
             // We have a node that isn't a common block level element, like a form or td tag.
             // Turn it into a div so it doesn't get filtered out later by accident.
             this.log("Altering sibling:", sibling, "to div.");
@@ -2412,6 +2419,224 @@ Readability.prototype = {
     );
   },
 
+  _normalizeImageCarousels(root) {
+    var candidates = this._allElements(root).filter(node =>
+      this._isLikelyImageCarousel(node)
+    );
+    var normalized = [];
+
+    this._forEachNode(candidates, function (candidate) {
+      if (
+        normalized.some(existing => existing.contains(candidate)) ||
+        !candidate.parentNode
+      ) {
+        return;
+      }
+
+      var replacement = this._buildReadabilityCarousel(candidate);
+      if (replacement) {
+        normalized.push(candidate);
+        candidate.parentNode.replaceChild(replacement, candidate);
+      }
+    });
+  },
+
+  _isReadabilityCarousel(node) {
+    return (
+      node &&
+      node.nodeType === this.ELEMENT_NODE &&
+      node.getAttribute("data-readability-carousel") === "true"
+    );
+  },
+
+  _isLikelyImageCarousel(node) {
+    if (!node || node.nodeType !== this.ELEMENT_NODE) {
+      return false;
+    }
+    var matchString = [
+      node.className || "",
+      node.id || "",
+      node.getAttribute("role") || "",
+      node.getAttribute("aria-roledescription") || "",
+      node.getAttribute("data-ride") || "",
+      node.getAttribute("data-gallery") || "",
+      node.getAttribute("data-component") || "",
+    ].join(" ");
+    var hasStrongCarouselMarker = this.REGEXPS.imageCarousel.test(matchString);
+    var hasImageGallerySemantics =
+      /\bimage\s+gallery\b/i.test(matchString) ||
+      /\bgallery\b/i.test(matchString) &&
+        this._allElements(node).some(child =>
+          child !== node &&
+          this.REGEXPS.imageCarousel.test(
+            `${child.className || ""} ${child.id || ""}`
+          )
+        );
+    if (!hasStrongCarouselMarker && !hasImageGallerySemantics) {
+      return false;
+    }
+
+    var images = this._carouselImageItems(node);
+    if (images.length < 2) {
+      return false;
+    }
+
+    var text = this._getInnerText(node);
+    if (text.length > 1600) {
+      return false;
+    }
+
+    var linkDensity = this._getLinkDensity(node);
+    if (linkDensity > 0.6 && text.length > 120) {
+      return false;
+    }
+
+    return true;
+  },
+
+  _carouselImageItems(node) {
+    var items = [];
+    var seen = new Set();
+    var images = node.getElementsByTagName("img");
+
+    for (var i = 0; i < images.length; i++) {
+      var image = images[i];
+      var src = this._bestCarouselImageSource(image);
+      if (!src || seen.has(src)) {
+        continue;
+      }
+      seen.add(src);
+      items.push({ image, src });
+    }
+
+    return items;
+  },
+
+  _bestCarouselImageSource(image) {
+    var attrs = [
+      "src",
+      "data-src",
+      "data-original",
+      "data-lazy-src",
+      "data-flickity-lazyload-src",
+      "data-flickity-lazyload",
+      "data-url",
+    ];
+    for (var i = 0; i < attrs.length; i++) {
+      var value = image.getAttribute(attrs[i]);
+      if (this._looksLikeRasterImageURL(value)) {
+        return value.trim();
+      }
+    }
+
+    var srcset =
+      image.getAttribute("srcset") ||
+      image.getAttribute("data-srcset") ||
+      image.getAttribute("data-flickity-lazyload-srcset");
+    var fromSrcset = this._firstImageFromSrcset(srcset);
+    if (fromSrcset) {
+      return fromSrcset;
+    }
+
+    var picture = image.closest && image.closest("picture");
+    if (picture) {
+      var sources = picture.getElementsByTagName("source");
+      for (var j = 0; j < sources.length; j++) {
+        fromSrcset = this._firstImageFromSrcset(
+          sources[j].getAttribute("srcset") ||
+            sources[j].getAttribute("data-srcset")
+        );
+        if (fromSrcset) {
+          return fromSrcset;
+        }
+      }
+    }
+
+    return "";
+  },
+
+  _looksLikeRasterImageURL(value) {
+    return !!value && /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(value);
+  },
+
+  _firstImageFromSrcset(srcset) {
+    if (!srcset) {
+      return "";
+    }
+    var candidates = String(srcset).split(",");
+    for (var i = 0; i < candidates.length; i++) {
+      var url = candidates[i].trim().split(/\s+/)[0];
+      if (this._looksLikeRasterImageURL(url)) {
+        return url;
+      }
+    }
+    return "";
+  },
+
+  _buildReadabilityCarousel(sourceNode) {
+    var items = this._carouselImageItems(sourceNode);
+    if (items.length < 2) {
+      return null;
+    }
+
+    var figure = this._doc.createElement("figure");
+    figure.setAttribute("data-readability-carousel", "true");
+    figure.setAttribute("role", "group");
+    figure.setAttribute("aria-label", "Image gallery");
+
+    var track = this._doc.createElement("div");
+    track.setAttribute("data-readability-carousel-track", "");
+    figure.appendChild(track);
+
+    this._forEachNode(items, function (item, index) {
+      var slide = this._doc.createElement("figure");
+      slide.setAttribute("data-readability-carousel-slide", "");
+
+      var img = this._doc.createElement("img");
+      img.setAttribute("src", item.src);
+      var alt = item.image.getAttribute("alt");
+      if (alt) {
+        img.setAttribute("alt", alt);
+      }
+      var width = item.image.getAttribute("width");
+      var height = item.image.getAttribute("height");
+      if (width) {
+        img.setAttribute("width", width);
+      }
+      if (height) {
+        img.setAttribute("height", height);
+      }
+      slide.appendChild(img);
+
+      var caption = this._carouselCaptionForImage(item.image, sourceNode);
+      if (caption) {
+        var figcaption = this._doc.createElement("figcaption");
+        figcaption.textContent = caption;
+        slide.appendChild(figcaption);
+      }
+
+      track.appendChild(slide);
+    });
+
+    return figure;
+  },
+
+  _carouselCaptionForImage(image, boundary) {
+    var current = image;
+    while (current && current !== boundary) {
+      var caption = current.querySelector &&
+        current.querySelector("figcaption, [class*='caption' i], [class*='credit' i]");
+      if (caption) {
+        var text = this._getInnerText(caption);
+        if (text && !/^\d+\s+of\s+\d+$/i.test(text)) {
+          return text;
+        }
+      }
+      current = current.parentNode;
+    }
+    return "";
+  },
+
   _getTextDensity(e, tags) {
     var textLength = this._getInnerText(e, true).length;
     if (textLength === 0) {
@@ -2979,6 +3204,7 @@ Readability.prototype = {
     this._removeScripts(this._doc);
 
     this._prepDocument();
+    this._normalizeImageCarousels(this._doc);
 
     var metadata = this._getArticleMetadata(jsonLd);
     this._metadata = metadata;

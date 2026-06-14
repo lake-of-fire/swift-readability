@@ -1133,6 +1133,8 @@ final class ArticleGrabber: ProcessorBase {
                 if let sr = siblingReadability,
                    (sr.contentScore + contentBonus) >= siblingScoreThreshold {
                     append = true
+                } else if isReadabilityCarousel(sibling) {
+                    append = true
                 } else if shouldKeepSibling(sibling: sibling) {
                     let nodeContent = getInnerText(sibling, regEx: regEx)
                     let nodeLength = nodeContent.utf8.count < 81 ? nodeContent.utf8.count : nodeContent.count
@@ -1151,7 +1153,7 @@ final class ArticleGrabber: ProcessorBase {
             }
 
             if append {
-                if !alterToDivExceptions.contains(sibling.tagNameUTF8()) {
+                if !isReadabilityCarousel(sibling), !alterToDivExceptions.contains(sibling.tagNameUTF8()) {
                     setNodeTag(node: sibling, tagName: ReadabilityUTF8Arrays.div)
                 }
                 _ = try? articleContent.appendChild(sibling)
@@ -1162,6 +1164,10 @@ final class ArticleGrabber: ProcessorBase {
 
     private func shouldKeepSibling(sibling: Element) -> Bool {
         return sibling.tagNameUTF8() == ReadabilityUTF8Arrays.p
+    }
+
+    private func isReadabilityCarousel(_ element: Element) -> Bool {
+        element.attrOrEmpty("data-readability-carousel").caseInsensitiveCompare("true") == .orderedSame
     }
 
     // MARK: Fifth step: prep article

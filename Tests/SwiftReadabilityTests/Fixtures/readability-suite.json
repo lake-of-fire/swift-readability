@@ -45,6 +45,15 @@
         "古来、日本人は宇宙を自然の延長と捉え",
         "9世紀頃に成立した日本最古の物語文学"
       ]
+    },
+    "hypebeast-inline-carousel": {
+      "contentIncludes": [
+        "data-readability-carousel",
+        "do-01.jpg",
+        "do-02.jpg",
+        "do-42.jpg",
+        "デザイナー 黒田雄一の手掛ける"
+      ]
     }
   },
   "knownFailures": [
