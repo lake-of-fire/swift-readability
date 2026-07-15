@@ -23,9 +23,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(path: "../SwiftSoup"),
-        // Pin to a Swift 6.2-compatible revision (SwiftSyntax 603.x).
-        .package(url: "https://github.com/apple/swift-testing.git", revision: "1d3961a0b006c25bec5301a01f4ba4fbfa7253c6")
+        .package(path: "../SwiftSoup")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -49,8 +47,7 @@ let package = Package(
         .testTarget(
             name: "SwiftReadabilityTests",
             dependencies: [
-                "SwiftReadability",
-                .product(name: "Testing", package: "swift-testing")
+                "SwiftReadability"
             ],
             exclude: [
                 "Fixtures"
