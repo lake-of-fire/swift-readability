@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift:
+    name: Swift 6.2 native suite
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report toolchain
+        run: swift --version
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build and test
+        run: swift test -c release
+
+  javascript-reference:
+    name: JavaScript reference parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Tests/JavaScript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Tests/JavaScript/package-lock.json
+      - name: Install reference-test dependencies
+        run: npm ci
+      - name: Run all shared fixtures
+        run: npm test
