@@ -28,7 +28,7 @@ Node and npm are needed only for the optional JavaScript reference and different
 
 WebURL is a pure-Swift, web-platform-test-verified implementation whose Swift 5.5 package manifest back-deploys across every platform supported here. Its core target has no platform runtime dependency: `SwiftReadability` links `WebURL`, `IDNA`, and `UnicodeDataStructures`. SwiftPM also resolves the separately declared Swift System integration package, but no Swift System target is linked into the production product. Binary distributors must retain WebURL's Apache-2.0 license and NOTICE attribution as described in [Third-party notices](THIRD_PARTY_NOTICES.md).
 
-WebURL adds native code to statically linked clients, so applications should measure final artifact size and extraction performance in their own build configuration. The checked Release benchmark is the performance-regression gate; this project does not present a stale point-in-time binary measurement as a universal size or speed claim.
+WebURL adds native code to statically linked clients, so applications should measure final artifact size and extraction performance in their own build configuration. The checked Release benchmark smoke verifies that the harness remains deterministic and fail-closed; it is not a performance-regression gate because no stored baseline or threshold is enforced. This project does not present a stale point-in-time binary measurement as a universal size or speed claim.
 
 ## Installation
 
@@ -107,7 +107,7 @@ Two fields are intentionally Swift-specific and are not represented as Mozilla o
 
 ## Behavioral authority and provenance
 
-The compatibility corpus contains 136 Mozilla-format HTML inputs. In default mode, the direct differential compares every input and every observable result field with the byte-for-byte upstream Mozilla JavaScript at commit `ab4027a`; Swift and Mozilla currently match **136/136**. The official `Readability.js` and `Readability-readerable.js` files are protected by fixed SHA-256 integrity tests so the oracle cannot be edited to make a divergence disappear.
+The compatibility corpus contains 136 Mozilla-format HTML inputs. In default mode, the direct differential compares every input and every observable result field with the byte-for-byte upstream Mozilla JavaScript at commit `ab4027a`; Swift and Mozilla currently match **136/136**. The official `Readability.js` and `Readability-readerable.js` files are protected by fixed SHA-256 integrity tests, making any oracle change require an explicit digest update and upstream verification during review.
 
 Mozilla's own JSDOM fixture runner deliberately removes source comments before comparing its frozen `expected.html` files, even though production Readability preserves comments inside selected content. This repository retains those upstream snapshots unchanged as provenance. For the 33 upstream inputs where raw comments change observable output, `expected-raw-input.html` is a generated overlay from the byte-verified Mozilla oracle. Generation first proves the legacy file still matches Mozilla under its historical comment-free input policy, then records the untouched raw-input result. Native and JavaScript fixture comparisons prefer the overlay and compare comment position and data strictly; neither production output nor the direct differential removes or masks comments.
 
@@ -142,7 +142,7 @@ npm --prefix Tests/JavaScript ci
 npm --prefix Tests/JavaScript run test:differential
 ```
 
-The differential checks parse success, readerability, every metadata field, exact browser-serialized `content`, text content, and Mozilla-compatible UTF-16 length with true default options and no extensions. A canonical DOM comparison runs as an additional structural diagnostic rather than masking serialization differences. The current full result is 136/136. It uses the optional `SwiftReadabilityJavaScriptReference` product as an oracle; it does not add JavaScript to the native product. Mozilla comparisons run in bounded, short-lived fixture batches so multi-megabyte JSDOM pages cannot accumulate across the corpus; injected mismatches and malformed batches are covered by fail-closed tests.
+The differential checks parse success, readerability, every metadata field, exact browser-serialized `content`, text content, and Mozilla-compatible UTF-16 length with true default options and no extensions. A canonical DOM comparison runs as an additional structural diagnostic rather than masking serialization differences. The current full result is 136/136. It uses the optional `SwiftReadabilityJavaScriptReference` product as an oracle; it does not add JavaScript to the native product. The executable oracle environment is pinned by `Tests/JavaScript/package-lock.json` to Node 22 in CI and JSDOM 29.1.1, because DOM and serialization behavior are part of the comparison surface. Mozilla comparisons run in bounded, short-lived fixture batches so multi-megabyte JSDOM pages cannot accumulate across the corpus; injected mismatches and malformed batches are covered by fail-closed tests.
 
 `npm test` also verifies that both oracle files are byte-for-byte Mozilla `ab4027a` using pinned SHA-256 values. A source change therefore fails independently of behavioral fixture results:
 
