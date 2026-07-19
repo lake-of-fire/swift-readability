@@ -31,8 +31,8 @@ Add SwiftReadability with Swift Package Manager:
 
 ```swift
 .package(
-    url: "https://github.com/lake-of-fire/swift-readability.git",
-    branch: "main"
+    url: "https://github.com/wolfyy970/swift-readability.git",
+    from: "0.1.0"
 )
 ```
 
