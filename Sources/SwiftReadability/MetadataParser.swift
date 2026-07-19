@@ -157,10 +157,9 @@ final class MetadataParser: ProcessorBase {
 
             if !elementProperty.isEmpty {
                 let range = NSRange(location: 0, length: elementProperty.utf16.count)
-                if let match = propertyPattern.firstMatch(in: elementProperty, options: [], range: range) {
-                    let start = elementProperty.index(elementProperty.startIndex, offsetBy: match.range.location)
-                    let end = elementProperty.index(start, offsetBy: match.range.length)
-                    let key = elementProperty[start..<end]
+                if let match = propertyPattern.firstMatch(in: elementProperty, options: [], range: range),
+                   let matchedRange = Range(match.range, in: elementProperty) {
+                    let key = elementProperty[matchedRange]
                         .lowercased()
                         .replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
                     values[key] = content.trimmingCharacters(in: .whitespacesAndNewlines)

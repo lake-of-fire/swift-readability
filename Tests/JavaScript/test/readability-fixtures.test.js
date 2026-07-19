@@ -12,13 +12,13 @@ const readabilityPath = process.env.READABILITY_JS_PATH
   ? path.resolve(process.env.READABILITY_JS_PATH)
   : path.resolve(
       __dirname,
-      "../../../Sources/SwiftReadability/Resources/Readability"
+      "../../../Sources/SwiftReadabilityJavaScriptReference/Resources/Readability"
     );
 const readerablePath = process.env.READERABLE_JS_PATH
   ? path.resolve(process.env.READERABLE_JS_PATH)
   : path.resolve(
       __dirname,
-      "../../../Sources/SwiftReadability/Resources/Readability-readerable"
+      "../../../Sources/SwiftReadabilityJavaScriptReference/Resources/Readability-readerable"
     );
 const Readability = require(readabilityPath);
 const isProbablyReaderable = require(readerablePath);
@@ -32,19 +32,17 @@ const manifestPath = path.resolve(
   "../../SwiftReadabilityTests/Fixtures/readability-suite.json"
 );
 const quietVirtualConsole = new VirtualConsole();
-
-function fixtureManifest() {
-  return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-}
+// Load once and fail during test discovery if the shared contract is malformed.
+// A parity run with no valid manifest must never be reported as green.
+const fixtureManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
 function selectedFixtureNames() {
-  const manifest = fixtureManifest();
   const value = process.env.SWIFT_READABILITY_FIXTURES;
   if (!value && process.env.SWIFT_READABILITY_FIXTURE_REGEX) {
     return null;
   }
   if (!value) {
-    const defaults = manifest.defaultFixtureSelection?.javascript;
+    const defaults = fixtureManifest.defaultFixtureSelection?.javascript;
     return defaults?.length ? new Set(defaults) : null;
   }
   return new Set(
@@ -59,9 +57,8 @@ function knownFailureNames() {
   if (process.env.SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES) {
     return new Set();
   }
-  const manifest = fixtureManifest();
   return new Set(
-    (manifest.knownFailures || [])
+    (fixtureManifest.knownFailures || [])
       .filter(failure =>
         failure.runners?.includes("javascript") || failure.runners?.includes("*")
       )
@@ -76,10 +73,42 @@ function loadFixtures() {
     ? new RegExp(process.env.SWIFT_READABILITY_FIXTURE_REGEX)
     : null;
 
-  return fs
+  const availableNames = fs
     .readdirSync(fixtureRoot, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
-    .map(entry => entry.name)
+    .map(entry => entry.name);
+  assert.ok(availableNames.length > 0, `No fixture directories found at ${fixtureRoot}`);
+
+  if (selected !== null) {
+    const unknownNames = [...selected].filter(name => !availableNames.includes(name));
+    assert.deepEqual(unknownNames, [], `Unknown fixture selection: ${unknownNames.join(", ")}`);
+  }
+
+  const unknownAssertions = Object.keys(fixtureManifest.assertions || {})
+    .filter(name => !availableNames.includes(name));
+  assert.deepEqual(
+    unknownAssertions,
+    [],
+    `Manifest assertions reference unknown fixtures: ${unknownAssertions.join(", ")}`
+  );
+
+  const extensionProfiles = fixtureManifest.extensionProfiles || {};
+  const unknownExtensionProfiles = Object.keys(extensionProfiles)
+    .filter(name => !availableNames.includes(name));
+  assert.deepEqual(
+    unknownExtensionProfiles,
+    [],
+    `Manifest extension profiles reference unknown fixtures: ${unknownExtensionProfiles.join(", ")}`
+  );
+  const unsupportedExtensionProfiles = Object.entries(extensionProfiles)
+    .filter(([, profile]) => profile !== "publisherAdaptations");
+  assert.deepEqual(
+    unsupportedExtensionProfiles,
+    [],
+    `Unsupported extension profiles: ${unsupportedExtensionProfiles.map(([name, profile]) => `${name}=${profile}`).join(", ")}`
+  );
+
+  const fixtures = availableNames
     .filter(name => selected === null || selected.has(name))
     .filter(name => !regex || regex.test(name))
     .filter(name => !knownFailures.has(name))
@@ -89,9 +118,7 @@ function loadFixtures() {
       const sourcePath = path.join(dir, "source.html");
       const expectedPath = path.join(dir, "expected.html");
       const metadataPath = path.join(dir, "expected-metadata.json");
-      if (!fs.existsSync(sourcePath)) {
-        return null;
-      }
+      assert.ok(fs.existsSync(sourcePath), `Missing source.html for fixture ${name}`);
       return {
         name,
         source: fs.readFileSync(sourcePath, "utf8").trim(),
@@ -101,10 +128,13 @@ function loadFixtures() {
         expectedMetadata: fs.existsSync(metadataPath)
           ? JSON.parse(fs.readFileSync(metadataPath, "utf8"))
           : null,
-        assertions: fixtureManifest().assertions?.[name] || null,
+        assertions: fixtureManifest.assertions?.[name] || null,
+        extensionProfile: extensionProfiles[name] || null,
       };
-    })
-    .filter(Boolean);
+    });
+
+  assert.ok(fixtures.length > 0, "Fixture selection matched zero runnable JavaScript fixtures");
+  return fixtures;
 }
 
 function prettyHTML(html) {
@@ -219,18 +249,21 @@ function removeCommentNodesRecursively(node) {
   }
 }
 
-describe("Readability.js fixture parity", { timeout: 30000 }, function () {
+// Resolve the corpus at module load so infrastructure errors set a nonzero
+// process status instead of becoming a zero-test suite that npm reports green.
+const fixtures = loadFixtures();
 
-  for (const fixture of loadFixtures()) {
+describe("Readability.js fixture parity", { timeout: 30000 }, function () {
+  for (const fixture of fixtures) {
     it(`parses ${fixture.name}`, function () {
-      const baseURL = fixtureManifest().baseURL || "http://fakehost/test/page.html";
+      const baseURL = fixtureManifest.baseURL || "http://fakehost/test/page.html";
       const dom = new JSDOM(fixture.source, {
         url: baseURL,
         virtualConsole: quietVirtualConsole,
       });
       removeCommentNodesRecursively(dom.window.document);
 
-      if (fixture.expectedMetadata?.readerable != null) {
+      if (!fixture.extensionProfile && fixture.expectedMetadata?.readerable != null) {
         assert.equal(
           isProbablyReaderable(dom.window.document),
           fixture.expectedMetadata.readerable
@@ -246,7 +279,10 @@ describe("Readability.js fixture parity", { timeout: 30000 }, function () {
         assert.ok(Object.prototype.hasOwnProperty.call(result, key), `Missing ${key}`);
       }
 
-      if (fixture.expectedMetadata) {
+      // Publisher-extension fixtures intentionally describe the native opt-in
+      // profile, not Mozilla's output. They still exercise the unmodified oracle
+      // for parse safety here and receive exact field coverage in the differential suite.
+      if (!fixture.extensionProfile && fixture.expectedMetadata) {
         expectOptionalEqual(result.title, fixture.expectedMetadata.title);
         expectOptionalEqual(result.byline, fixture.expectedMetadata.byline);
         expectOptionalEqual(result.dir, fixture.expectedMetadata.dir);
@@ -259,7 +295,7 @@ describe("Readability.js fixture parity", { timeout: 30000 }, function () {
         );
       }
 
-      if (fixture.assertions) {
+      if (!fixture.extensionProfile && fixture.assertions) {
         for (const excludedText of fixture.assertions.textExcludes || []) {
           assert.ok(
             !result.textContent.includes(excludedText),
@@ -280,7 +316,7 @@ describe("Readability.js fixture parity", { timeout: 30000 }, function () {
         }
       }
 
-      if (fixture.expectedHTML) {
+      if (!fixture.extensionProfile && fixture.expectedHTML) {
         expectDOMEqual(result.content, fixture.expectedHTML);
       }
     });

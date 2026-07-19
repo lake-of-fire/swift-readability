@@ -12,9 +12,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
- * Modified by SwiftReadability contributors to track Mozilla Readability
- * behavior and the additional fixtures documented in this repository.
  */
 
 /*
@@ -141,14 +138,14 @@ Readability.prototype = {
     // NOTE: These two regular expressions are duplicated in
     // Readability-readerable.js. Please keep both copies in sync.
     unlikelyCandidates:
-      /-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
+      /-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
     okMaybeItsACandidate:
       /and|article|body|column|content|main|mathjax|shadow/i,
 
     positive:
       /article|body|content|entry|hentry|h-entry|main|page|pagination|post|text|blog|story/i,
     negative:
-      /-ad-|admod|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|notprint|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget/i,
+      /-ad-|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget/i,
     extraneous:
       /print|archive|comment|discuss|e[\-]?mail|share|reply|all|login|sign|single|utility/i,
     byline: /byline|author|dateline|writtenby|p-author/i,
@@ -176,8 +173,6 @@ Readability.prototype = {
       /^(ad(vertising|vertisement)?|pub(licité)?|werb(ung)?|广告|Реклама|Anuncio)$/iu,
     loadingWords:
       /^((loading|正在加载|Загрузка|chargement|cargando)(…|\.\.\.)?)$/iu,
-    imageCarousel:
-      /carousel|slider|slideshow|swiper|flickity|splide|keen-slider|glide/i,
   },
 
   UNLIKELY_ROLES: [
@@ -826,7 +821,6 @@ Readability.prototype = {
         );
       });
     });
-    this._cleanArticleChrome(articleContent);
 
     this._clean(articleContent, "iframe");
     this._clean(articleContent, "input");
@@ -846,7 +840,6 @@ Readability.prototype = {
       this._getAllNodesWithTag(articleContent, ["h1"]),
       "h2"
     );
-    this._removeLeadingCompactChrome(articleContent);
 
     // Remove extra paragraphs
     this._removeNodes(
@@ -1496,8 +1489,6 @@ Readability.prototype = {
               siblingScoreThreshold
           ) {
             append = true;
-          } else if (this._isReadabilityCarousel(sibling)) {
-            append = true;
           } else if (sibling.nodeName === "P") {
             var linkDensity = this._getLinkDensity(sibling);
             var nodeContent = this._getInnerText(sibling);
@@ -1519,10 +1510,7 @@ Readability.prototype = {
         if (append) {
           this.log("Appending node:", sibling);
 
-          if (
-            !this._isReadabilityCarousel(sibling) &&
-            !this.ALTER_TO_DIV_EXCEPTIONS.includes(sibling.nodeName)
-          ) {
+          if (!this.ALTER_TO_DIV_EXCEPTIONS.includes(sibling.nodeName)) {
             // We have a node that isn't a common block level element, like a form or td tag.
             // Turn it into a div so it doesn't get filtered out later by accident.
             this.log("Altering sibling:", sibling, "to div.");
@@ -2449,224 +2437,6 @@ Readability.prototype = {
     );
   },
 
-  _normalizeImageCarousels(root) {
-    var candidates = this._allElements(root).filter(node =>
-      this._isLikelyImageCarousel(node)
-    );
-    var normalized = [];
-
-    this._forEachNode(candidates, function (candidate) {
-      if (
-        normalized.some(existing => existing.contains(candidate)) ||
-        !candidate.parentNode
-      ) {
-        return;
-      }
-
-      var replacement = this._buildReadabilityCarousel(candidate);
-      if (replacement) {
-        normalized.push(candidate);
-        candidate.parentNode.replaceChild(replacement, candidate);
-      }
-    });
-  },
-
-  _isReadabilityCarousel(node) {
-    return (
-      node &&
-      node.nodeType === this.ELEMENT_NODE &&
-      node.getAttribute("data-readability-carousel") === "true"
-    );
-  },
-
-  _isLikelyImageCarousel(node) {
-    if (!node || node.nodeType !== this.ELEMENT_NODE) {
-      return false;
-    }
-    var matchString = [
-      node.className || "",
-      node.id || "",
-      node.getAttribute("role") || "",
-      node.getAttribute("aria-roledescription") || "",
-      node.getAttribute("data-ride") || "",
-      node.getAttribute("data-gallery") || "",
-      node.getAttribute("data-component") || "",
-    ].join(" ");
-    var hasStrongCarouselMarker = this.REGEXPS.imageCarousel.test(matchString);
-    var hasImageGallerySemantics =
-      /\bimage\s+gallery\b/i.test(matchString) ||
-      /\bgallery\b/i.test(matchString) &&
-        this._allElements(node).some(child =>
-          child !== node &&
-          this.REGEXPS.imageCarousel.test(
-            `${child.className || ""} ${child.id || ""}`
-          )
-        );
-    if (!hasStrongCarouselMarker && !hasImageGallerySemantics) {
-      return false;
-    }
-
-    var images = this._carouselImageItems(node);
-    if (images.length < 2) {
-      return false;
-    }
-
-    var text = this._getInnerText(node);
-    if (text.length > 1600) {
-      return false;
-    }
-
-    var linkDensity = this._getLinkDensity(node);
-    if (linkDensity > 0.6 && text.length > 120) {
-      return false;
-    }
-
-    return true;
-  },
-
-  _carouselImageItems(node) {
-    var items = [];
-    var seen = new Set();
-    var images = node.getElementsByTagName("img");
-
-    for (var i = 0; i < images.length; i++) {
-      var image = images[i];
-      var src = this._bestCarouselImageSource(image);
-      if (!src || seen.has(src)) {
-        continue;
-      }
-      seen.add(src);
-      items.push({ image, src });
-    }
-
-    return items;
-  },
-
-  _bestCarouselImageSource(image) {
-    var attrs = [
-      "src",
-      "data-src",
-      "data-original",
-      "data-lazy-src",
-      "data-flickity-lazyload-src",
-      "data-flickity-lazyload",
-      "data-url",
-    ];
-    for (var i = 0; i < attrs.length; i++) {
-      var value = image.getAttribute(attrs[i]);
-      if (this._looksLikeRasterImageURL(value)) {
-        return value.trim();
-      }
-    }
-
-    var srcset =
-      image.getAttribute("srcset") ||
-      image.getAttribute("data-srcset") ||
-      image.getAttribute("data-flickity-lazyload-srcset");
-    var fromSrcset = this._firstImageFromSrcset(srcset);
-    if (fromSrcset) {
-      return fromSrcset;
-    }
-
-    var picture = image.closest && image.closest("picture");
-    if (picture) {
-      var sources = picture.getElementsByTagName("source");
-      for (var j = 0; j < sources.length; j++) {
-        fromSrcset = this._firstImageFromSrcset(
-          sources[j].getAttribute("srcset") ||
-            sources[j].getAttribute("data-srcset")
-        );
-        if (fromSrcset) {
-          return fromSrcset;
-        }
-      }
-    }
-
-    return "";
-  },
-
-  _looksLikeRasterImageURL(value) {
-    return !!value && /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(value);
-  },
-
-  _firstImageFromSrcset(srcset) {
-    if (!srcset) {
-      return "";
-    }
-    var candidates = String(srcset).split(",");
-    for (var i = 0; i < candidates.length; i++) {
-      var url = candidates[i].trim().split(/\s+/)[0];
-      if (this._looksLikeRasterImageURL(url)) {
-        return url;
-      }
-    }
-    return "";
-  },
-
-  _buildReadabilityCarousel(sourceNode) {
-    var items = this._carouselImageItems(sourceNode);
-    if (items.length < 2) {
-      return null;
-    }
-
-    var figure = this._doc.createElement("figure");
-    figure.setAttribute("data-readability-carousel", "true");
-    figure.setAttribute("role", "group");
-    figure.setAttribute("aria-label", "Image gallery");
-
-    var track = this._doc.createElement("div");
-    track.setAttribute("data-readability-carousel-track", "");
-    figure.appendChild(track);
-
-    this._forEachNode(items, function (item, index) {
-      var slide = this._doc.createElement("figure");
-      slide.setAttribute("data-readability-carousel-slide", "");
-
-      var img = this._doc.createElement("img");
-      img.setAttribute("src", item.src);
-      var alt = item.image.getAttribute("alt");
-      if (alt) {
-        img.setAttribute("alt", alt);
-      }
-      var width = item.image.getAttribute("width");
-      var height = item.image.getAttribute("height");
-      if (width) {
-        img.setAttribute("width", width);
-      }
-      if (height) {
-        img.setAttribute("height", height);
-      }
-      slide.appendChild(img);
-
-      var caption = this._carouselCaptionForImage(item.image, sourceNode);
-      if (caption) {
-        var figcaption = this._doc.createElement("figcaption");
-        figcaption.textContent = caption;
-        slide.appendChild(figcaption);
-      }
-
-      track.appendChild(slide);
-    });
-
-    return figure;
-  },
-
-  _carouselCaptionForImage(image, boundary) {
-    var current = image;
-    while (current && current !== boundary) {
-      var caption = current.querySelector &&
-        current.querySelector("figcaption, [class*='caption' i], [class*='credit' i]");
-      if (caption) {
-        var text = this._getInnerText(caption);
-        if (text && !/^\d+\s+of\s+\d+$/i.test(text)) {
-          return text;
-        }
-      }
-      current = current.parentNode;
-    }
-    return "";
-  },
-
   _getTextDensity(e, tags) {
     var textLength = this._getInnerText(e, true).length;
     if (textLength === 0) {
@@ -2806,7 +2576,6 @@ Readability.prototype = {
         );
         var textDensity = this._getTextDensity(node, textishTags);
         var isFigureChild = this._hasAncestorTag(node, "figure");
-        var hasSignificantMedia = this._hasSignificantMediaContent(node, img);
 
         // apply shadiness checks, then check for exceptions
         const shouldRemoveNode = () => {
@@ -2833,7 +2602,6 @@ Readability.prototype = {
             );
           }
           if (
-            !hasSignificantMedia &&
             !isList &&
             weight < 25 &&
             linkDensity > 0.2 + this._linkDensityModifier
@@ -2887,243 +2655,6 @@ Readability.prototype = {
       }
       return false;
     });
-  },
-
-  _cleanArticleChrome(articleContent) {
-    this._removeNodes(this._getAllNodesWithTag(articleContent, ["ul"]), function (list) {
-      return this._isArticleActionList(list);
-    });
-
-    this._removeNodes(this._getAllNodesWithTag(articleContent, ["div"]), function (node) {
-      return (
-        this._isCompactNonPrintOrAdNode(node) ||
-        this._isCompactRelatedSection(node)
-      );
-    });
-
-    this._removeNodes(this._getAllNodesWithTag(articleContent, ["section"]), function (node) {
-      return this._isCompactRelatedSection(node);
-    });
-
-    this._removeNodes(this._getAllNodesWithTag(articleContent, ["p"]), function (paragraph) {
-      return /^\s*\[?\s*PR\s*\]?\s*$/i.test(this._getInnerText(paragraph));
-    });
-
-    this._removeCompactComponentContainers(
-      articleContent,
-      /(paid|subscribe|register|login)/i,
-      500
-    );
-  },
-
-  _isArticleActionList(list) {
-    var dataContentType = list.getAttribute("data-content-type") || "";
-    var componentText = this._componentNames(list).join(" ");
-    var text = this._getInnerText(list);
-    var hasActionComponent =
-      /(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*/i.test(
-        componentText
-      );
-    var hasActionText =
-      text.includes("印刷") ||
-      /share/i.test(text) ||
-      text.includes("シェア") ||
-      /facebook/i.test(text) ||
-      /twitter/i.test(text);
-
-    if (
-      dataContentType.toLowerCase() === "article" &&
-      (hasActionComponent || hasActionText)
-    ) {
-      return true;
-    }
-    return hasActionComponent && text.length < 300;
-  },
-
-  _isCompactNonPrintOrAdNode(node) {
-    var matchString = `${node.className || ""} ${node.id || ""}`.toLowerCase();
-    if (!matchString.includes("notprint") && !matchString.includes("admod")) {
-      return false;
-    }
-    return this._getInnerText(node).length < 500;
-  },
-
-  _isCompactRelatedSection(node) {
-    var text = this._getInnerText(node);
-    if (text.length >= 500) {
-      return false;
-    }
-    var headingText = Array.from(this._getAllNodesWithTag(node, [
-      "h1",
-      "h2",
-      "h3",
-      "h4",
-      "h5",
-      "h6",
-    ]))
-      .map(heading => this._getInnerText(heading))
-      .join(" ");
-    if (!/(related|recommended|関連記事|関連トピック|ジャンル)/i.test(headingText)) {
-      return false;
-    }
-    return this._getLinkDensity(node) > 0.15 || node.getElementsByTagName("a").length > 0;
-  },
-
-  _removeLeadingCompactChrome(articleContent) {
-    var current = articleContent;
-    while (current && current.children.length) {
-      var firstChild = current.children[0];
-      if (this._isPhrasingContent(firstChild)) {
-        break;
-      }
-      if (this._isCompactMediaActionChrome(firstChild)) {
-        firstChild.remove();
-        continue;
-      }
-      if (!firstChild.children.length) {
-        break;
-      }
-      current = firstChild;
-    }
-  },
-
-  _isCompactMediaActionChrome(node) {
-    var text = this._getInnerText(node);
-    if (text.length > 250) {
-      return false;
-    }
-    var imageCount = node.getElementsByTagName("img").length;
-    if (imageCount === 0 || imageCount > 4) {
-      return false;
-    }
-    if (
-      this._getAllNodesWithTag(node, [
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "figure",
-        "picture",
-        "iframe",
-        "object",
-        "embed",
-        "input",
-        "button",
-        "select",
-        "textarea",
-      ]).length > 0
-    ) {
-      return false;
-    }
-    var linkCount = node.getElementsByTagName("a").length;
-    var listCount =
-      node.getElementsByTagName("ul").length +
-      node.getElementsByTagName("ol").length;
-    var matchString = `${node.className || ""} ${node.id || ""}`;
-    var hasActionMarker = /(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*/i.test(matchString);
-    if (linkCount === 0 || (listCount === 0 && !hasActionMarker)) {
-      return false;
-    }
-    if (text.length > 40 && this._getLinkDensity(node) <= 0.35) {
-      return false;
-    }
-    return this._hasFollowingArticleBody(node);
-  },
-
-  _hasFollowingArticleBody(node) {
-    var current = node;
-    while (current && current.parentNode) {
-      var sibling = current.nextElementSibling;
-      while (sibling) {
-        var text = this._getInnerText(sibling);
-        var hasMedia =
-          sibling.getElementsByTagName("img").length > 0 ||
-          sibling.getElementsByTagName("figure").length > 0 ||
-          sibling.getElementsByTagName("picture").length > 0;
-        if (text.length >= 300 || (hasMedia && text.length >= 80)) {
-          return true;
-        }
-        if (text.length > 100 || hasMedia) {
-          return false;
-        }
-        sibling = sibling.nextElementSibling;
-      }
-      current = current.parentNode;
-    }
-    return false;
-  },
-
-  _removeCompactComponentContainers(articleContent, componentPattern, maximumTextLength) {
-    this._forEachNode(this._allElements(articleContent), function (component) {
-      var componentName = component.getAttribute("x-component-name") || "";
-      if (!componentPattern.test(componentName)) {
-        return;
-      }
-
-      var candidate = null;
-      var current = component;
-      while (current && current !== articleContent) {
-        var tagName = current.tagName;
-        if (tagName === "DIV" || tagName === "SECTION" || tagName === "ASIDE") {
-          if (this._getInnerText(current).length <= maximumTextLength) {
-            candidate = current;
-          }
-        }
-        current = current.parentNode;
-      }
-      if (candidate && candidate.parentNode) {
-        candidate.parentNode.removeChild(candidate);
-      }
-    });
-  },
-
-  _componentNames(element) {
-    return this._allElements(element)
-      .map(node => node.getAttribute("x-component-name"))
-      .filter(Boolean);
-  },
-
-  _allElements(element) {
-    var result = [];
-    var stack = [element];
-    while (stack.length) {
-      var current = stack.pop();
-      result.push(current);
-      for (var i = current.children.length - 1; i >= 0; i--) {
-        stack.push(current.children[i]);
-      }
-    }
-    return result;
-  },
-
-  _hasSignificantMediaContent(node, imgCount) {
-    if (imgCount <= 0) {
-      return false;
-    }
-    var figureCount = node.getElementsByTagName("figure").length;
-    var pictureCount = node.getElementsByTagName("picture").length;
-    if (figureCount + pictureCount !== 1) {
-      return false;
-    }
-    if (this._getAllNodesWithTag(node, ["h1", "h2", "h3", "h4", "h5", "h6"]).length > 0) {
-      return false;
-    }
-    if (
-      this._getAllNodesWithTag(node, [
-        "iframe",
-        "object",
-        "embed",
-        "input",
-        "button",
-        "select",
-        "textarea",
-      ]).length > 0
-    ) {
-      return false;
-    }
-    return this._getInnerText(node).length < 500;
   },
 
   /**
@@ -3234,7 +2765,6 @@ Readability.prototype = {
     this._removeScripts(this._doc);
 
     this._prepDocument();
-    this._normalizeImageCarousels(this._doc);
 
     var metadata = this._getArticleMetadata(jsonLd);
     this._metadata = metadata;

@@ -25,7 +25,6 @@ enum ReadabilityUTF8Arrays {
     static let dfn = "dfn".utf8Array
     static let em = UTF8Arrays.em
     static let embed = "embed".utf8Array
-    static let fieldset = "fieldset".utf8Array
     static let figure = "figure".utf8Array
     static let form = UTF8Arrays.form
     static let h1 = "h1".utf8Array
@@ -84,7 +83,6 @@ enum ReadabilityUTF8Arrays {
     static let ariaHidden = "aria-hidden".utf8Array
     static let ariaModal = "aria-modal".utf8Array
     static let background = "background".utf8Array
-    static let base = UTF8Arrays.base
     static let bgcolor = "bgcolor".utf8Array
     static let border = "border".utf8Array
     static let cellpadding = "cellpadding".utf8Array

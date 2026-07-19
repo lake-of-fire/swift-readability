@@ -1,40 +1,72 @@
 import Foundation
 import SwiftSoup
 
+/// The observable article fields returned by Mozilla-compatible extraction.
 public struct ReadabilityResult: Sendable {
+    /// The resolved article title, or `nil` when no title signal is available.
     public let title: String?
+    /// The resolved author/byline.
     public let byline: String?
+    /// The inherited text direction, such as `ltr` or `rtl`.
     public let dir: String?
+    /// The document language declared by the source HTML element.
     public let lang: String?
+    /// The metadata excerpt, falling back to the first retained paragraph.
     public let excerpt: String?
+    /// The publisher or site name supplied by structured metadata.
     public let siteName: String?
+    /// The publication time supplied by structured metadata.
     public let publishedTime: String?
+    /// Serialized HTML for the extracted article subtree.
     public let content: String
+    /// DOM `textContent` semantics: descendant text nodes concatenated in document order.
     public let textContent: String
+    /// `textContent` length in UTF-16 code units, matching JavaScript `String.length`.
     public let length: Int
+    /// Whether Mozilla's lightweight preflight heuristic considered the source readerable.
     public let readerable: Bool
 
+    /// A descriptive alias for ``content``.
     public var contentHTML: String { content }
 }
 
+/// A readability result whose content was projected by a caller-supplied serializer.
 public struct ReadabilitySerializedResult<Content> {
+    /// The resolved article title, or `nil` when no title signal is available.
     public let title: String?
+    /// The resolved author/byline.
     public let byline: String?
+    /// The inherited text direction, such as `ltr` or `rtl`.
     public let dir: String?
+    /// The language declared by the source document.
     public let lang: String?
+    /// The metadata excerpt, falling back to the first retained paragraph.
     public let excerpt: String?
+    /// The publisher or site name supplied by structured metadata.
     public let siteName: String?
+    /// The publication time supplied by structured metadata.
     public let publishedTime: String?
+    /// The caller-defined projection of the detached extracted article element.
     public let content: Content
+    /// DOM `textContent` semantics: descendant text nodes concatenated in document order.
     public let textContent: String
+    /// ``textContent`` length in UTF-16 code units, matching JavaScript `String.length`.
     public let length: Int
+    /// Whether Mozilla's lightweight preflight heuristic considered the source readerable.
     public let readerable: Bool
 }
 
-/// Pure Swift façade aligned with Mozilla Readability, using SwiftSoup for DOM processing.
+extension ReadabilitySerializedResult: Sendable where Content: Sendable {}
+
+/// A native Swift implementation of Mozilla Readability using SwiftSoup for DOM processing.
+///
+/// HTML-backed instances parse a fresh document for each call. Document-backed instances
+/// operate directly on—and destructively normalize—the supplied DOM, matching Mozilla's
+/// mutation contract. A `Readability` instance is not `Sendable`; create and use it within
+/// one task or actor.
 public final class Readability {
     private static let unlikelyCandidatesRegex = try! NSRegularExpression(
-        pattern: "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
+        pattern: "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",
         options: [.caseInsensitive]
     )
     private static let okMaybeItsACandidateRegex = try! NSRegularExpression(
@@ -51,9 +83,8 @@ public final class Readability {
     private let document: Document?
 
     private let regEx: RegExUtil
-    private lazy var preprocessor = Preprocessor(regEx: regEx)
+    private lazy var preprocessor = Preprocessor(regEx: regEx, extensions: options.extensions)
     private lazy var metadataParser = MetadataParser(regEx: regEx)
-    private lazy var articleGrabber = ArticleGrabber(options: options, regEx: regEx)
     private lazy var postprocessor = Postprocessor()
 
     var debugEnabled: Bool { options.debug }
@@ -62,11 +93,12 @@ public final class Readability {
     var keepClasses: Bool { options.keepClasses }
     var allowedVideoRegex: NSRegularExpression { options.allowedVideoRegex ?? regEx.allowedVideoRegex }
 
+    /// Creates an extractor from an HTML snapshot and the URL used to resolve relative links.
     public init(html: String, url: URL, options: ReadabilityOptions = ReadabilityOptions()) {
         self.html = html
         self.url = url
         self.options = options
-        self.regEx = RegExUtil(allowedVideoRegex: options.allowedVideoRegex)
+        self.regEx = RegExUtil(options: options)
         self.document = nil
     }
 
@@ -74,20 +106,21 @@ public final class Readability {
         self.html = html
         self.url = url
         self.options = options
-        self.regEx = RegExUtil(allowedVideoRegex: options.allowedVideoRegex)
+        self.regEx = RegExUtil(options: options)
         self.document = document
     }
 
+    /// Creates an extractor that mutates the supplied SwiftSoup document in place.
     public convenience init(document: Document, options: ReadabilityOptions = ReadabilityOptions()) {
         let baseUri = document.location()
         let resolvedURL = URL(string: baseUri) ?? URL(string: "about:blank")!
         self.init(html: "", url: resolvedURL, document: document, options: options)
     }
 
-    /// Run the full readability algorithm and return the extracted result.
+    /// Runs the full extraction pipeline, returning `nil` when no article can be selected.
     public func parse() throws -> ReadabilityResult? {
         guard let parsed = try parseArticle() else { return nil }
-        let textContent = (try? parsed.articleContent.text()) ?? ""
+        let textContent = textContentPreservingWhitespace(of: parsed.articleContent)
         let contentHTML: String
         if let serializer = options.serializer {
             contentHTML = serializer(parsed.articleContent)
@@ -102,23 +135,28 @@ public final class Readability {
 
         return ReadabilityResult(
             title: parsed.metadata.title,
-            byline: parsed.metadata.byline ?? articleGrabber.articleByline,
-            dir: articleGrabber.articleDir,
+            byline: parsed.metadata.byline ?? parsed.articleByline,
+            dir: parsed.articleDirection,
             lang: parsed.lang,
             excerpt: parsed.metadata.excerpt,
             siteName: parsed.metadata.siteName,
             publishedTime: parsed.metadata.publishedTime,
             content: contentHTML,
             textContent: textContent,
-            length: textContent.count,
+            length: textContent.utf16.count,
             readerable: parsed.readerable
         )
     }
 
+    /// Per-stage wall-clock measurements collected by ``parseWithTimings()``.
+    ///
+    /// Keys are diagnostic implementation labels and are not a stable public protocol.
     @_spi(Bench)
     public struct ReadabilityTimings: Sendable {
+        /// Cumulative elapsed milliseconds keyed by extraction-stage label.
         public let milliseconds: [String: Double]
 
+        /// Creates a timing snapshot from cumulative stage measurements.
         @_spi(Bench)
         public init(milliseconds: [String: Double]) {
             self.milliseconds = milliseconds
@@ -138,6 +176,9 @@ public final class Readability {
         }
     }
 
+    /// Runs the same extraction path as ``parse()`` while collecting diagnostic timings.
+    ///
+    /// - Returns: The extraction result, if any, and cumulative per-stage wall-clock timings.
     @_spi(Bench)
     public func parseWithTimings() throws -> (ReadabilityResult?, ReadabilityTimings) {
         let timing = TimingCollector()
@@ -145,7 +186,9 @@ public final class Readability {
             return (nil, ReadabilityTimings(milliseconds: timing.milliseconds))
         }
 
-        let textContent = timing.measure("textContent") { (try? parsed.articleContent.text()) ?? "" }
+        let textContent = timing.measure("textContent") {
+            textContentPreservingWhitespace(of: parsed.articleContent)
+        }
         let contentHTML: String = timing.measure("serialize") {
             if let serializer = options.serializer {
                 return serializer(parsed.articleContent)
@@ -160,58 +203,72 @@ public final class Readability {
 
         let result = ReadabilityResult(
             title: parsed.metadata.title,
-            byline: parsed.metadata.byline ?? articleGrabber.articleByline,
-            dir: articleGrabber.articleDir,
+            byline: parsed.metadata.byline ?? parsed.articleByline,
+            dir: parsed.articleDirection,
             lang: parsed.lang,
             excerpt: parsed.metadata.excerpt,
             siteName: parsed.metadata.siteName,
             publishedTime: parsed.metadata.publishedTime,
             content: contentHTML,
             textContent: textContent,
-            length: textContent.count,
+            length: textContent.utf16.count,
             readerable: parsed.readerable
         )
         return (result, ReadabilityTimings(milliseconds: timing.milliseconds))
     }
 
+    /// Runs extraction and projects the detached article element into an arbitrary content type.
     public func parse<Content>(serializer: (Element) -> Content) throws -> ReadabilitySerializedResult<Content>? {
         guard let parsed = try parseArticle() else { return nil }
         let content = serializer(parsed.articleContent)
-        let textContent = (try? parsed.articleContent.text()) ?? ""
+        let textContent = textContentPreservingWhitespace(of: parsed.articleContent)
         return ReadabilitySerializedResult(
             title: parsed.metadata.title,
-            byline: parsed.metadata.byline ?? articleGrabber.articleByline,
-            dir: articleGrabber.articleDir,
+            byline: parsed.metadata.byline ?? parsed.articleByline,
+            dir: parsed.articleDirection,
             lang: parsed.lang,
             excerpt: parsed.metadata.excerpt,
             siteName: parsed.metadata.siteName,
             publishedTime: parsed.metadata.publishedTime,
             content: content,
             textContent: textContent,
-            length: textContent.count,
+            length: textContent.utf16.count,
             readerable: parsed.readerable
         )
     }
 
     // MARK: Readerable heuristic
+    /// Applies Mozilla's inexpensive readerability heuristic to an HTML string.
     public static func isProbablyReaderable(html: String) -> Bool {
         guard let doc = try? SwiftSoup.parse(html) else { return false }
         return isProbablyReaderable(doc: doc)
     }
 
+    /// Applies the readerability heuristic to an existing document without extracting it.
     public static func isProbablyReaderable(document: Document, options: ReaderableOptions = ReaderableOptions()) -> Bool {
         return isProbablyReaderable(doc: document, options: options, visibilityChecker: options.visibilityChecker)
     }
 
+    /// Applies the heuristic using a caller-defined visibility predicate.
     public static func isProbablyReaderable(document: Document, visibilityChecker: @escaping (Element) -> Bool) -> Bool {
         return isProbablyReaderable(doc: document, options: ReaderableOptions(), visibilityChecker: visibilityChecker)
     }
 
+    /// Thresholds and visibility policy for the lightweight readerability heuristic.
     public struct ReaderableOptions {
+        /// Minimum candidate text length considered by the heuristic.
         public var minContentLength: Int
+        /// Accumulated score required before a document is considered readerable.
         public var minScore: Double
+        /// Optional visibility predicate; returning `false` excludes an element.
         public var visibilityChecker: ((Element) -> Bool)?
 
+        /// Creates heuristic options using Mozilla's default thresholds.
+        ///
+        /// - Parameters:
+        ///   - minContentLength: Minimum candidate text length considered for scoring.
+        ///   - minScore: Accumulated score required to classify the document as readerable.
+        ///   - visibilityChecker: Optional predicate that excludes elements by returning `false`.
         public init(minContentLength: Int = 140,
                     minScore: Double = 20.0,
                     visibilityChecker: ((Element) -> Bool)? = nil) {
@@ -221,11 +278,13 @@ public final class Readability {
         }
     }
 
+    /// Applies the readerability heuristic to HTML with custom thresholds.
     public static func isProbablyReaderable(html: String, options: ReaderableOptions) -> Bool {
         guard let doc = try? SwiftSoup.parse(html) else { return false }
         return isProbablyReaderable(doc: doc, options: options, visibilityChecker: options.visibilityChecker)
     }
 
+    /// Applies the readerability heuristic to HTML using a custom visibility predicate.
     public static func isProbablyReaderable(html: String, visibilityChecker: @escaping (Element) -> Bool) -> Bool {
         guard let doc = try? SwiftSoup.parse(html) else { return false }
         return isProbablyReaderable(doc: doc, options: ReaderableOptions(), visibilityChecker: visibilityChecker)
@@ -316,30 +375,29 @@ private extension Readability {
         let metadata: ArticleMetadata
         let readerable: Bool
         let lang: String?
+        let articleByline: String?
+        let articleDirection: String?
         let isLiveDocument: Bool
     }
 
     private func parseArticle(timing: TimingSink? = nil) throws -> ParsedArticle? {
+        // ArticleGrabber owns per-extraction scores and DOM identity caches. Keep
+        // its lifetime inside one invocation so public Readability instances are
+        // deterministic when HTML-backed clients call parse more than once.
+        let articleGrabber = ArticleGrabber(options: options, regEx: regEx)
         let document: Document
         let isLiveDocument: Bool
         if let provided = self.document {
             document = provided
             isLiveDocument = true
         } else {
-            if let timing {
-                document = try timing.measure("parseDocument") {
-                    try SwiftSoup.parse(html, url.absoluteString)
-                }
-            } else {
-                document = try SwiftSoup.parse(html, url.absoluteString)
+            document = try measured("parseDocument", by: timing) {
+                try SwiftSoup.parse(html, url.absoluteString)
             }
             isLiveDocument = false
         }
-        let readerable: Bool
-        if let timing {
-            readerable = timing.measure("readerable") { Readability.isProbablyReaderable(doc: document) }
-        } else {
-            readerable = Readability.isProbablyReaderable(doc: document)
+        let readerable = measured("readerable", by: timing) {
+            Readability.isProbablyReaderable(doc: document)
         }
 
         if options.maxElemsToParse > 0 {
@@ -350,42 +408,19 @@ private extension Readability {
             }
         }
 
-        let metadata: ArticleMetadata
-        if let timing {
-            metadata = timing.measure("metadata") {
-                metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
-            }
-            _ = timing.measure("preprocess") {
-                preprocessor.prepareDocument(document)
-            }
-        } else {
-            metadata = metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
+        let metadata = measured("metadata", by: timing) {
+            metadataParser.getArticleMetadata(document, disableJSONLD: options.disableJSONLD)
+        }
+        measured("preprocess", by: timing) {
             preprocessor.prepareDocument(document)
         }
 
-        let articleContent: Element
-        if let timing {
-            let content = timing.measure("grabArticle") {
-                articleGrabber.grabArticle(doc: document, metadata: metadata, timing: timing)
-            }
-            guard let content else { return nil }
-            articleContent = content
-        } else {
-            guard let content = articleGrabber.grabArticle(doc: document, metadata: metadata) else { return nil }
-            articleContent = content
+        let content = measured("grabArticle", by: timing) {
+            articleGrabber.grabArticle(doc: document, metadata: metadata, timing: timing)
         }
+        guard let articleContent = content else { return nil }
 
-        if let timing {
-            _ = timing.measure("postprocess") {
-                postprocessor.postProcessContent(
-                    originalDocument: document,
-                    articleContent: articleContent,
-                    articleUri: url.absoluteString,
-                    keepClasses: options.keepClasses,
-                    classesToPreserve: options.classesToPreserve
-                )
-            }
-        } else {
+        measured("postprocess", by: timing) {
             postprocessor.postProcessContent(
                 originalDocument: document,
                 articleContent: articleContent,
@@ -398,18 +433,7 @@ private extension Readability {
         if (metadata.excerpt ?? "").isEmpty {
             // SwiftSoup's getElementsByTag caches tag indexes and can become stale after DOM mutations.
             // Prefer select("p") here to mirror Readability.js's document-order selection reliably.
-            if let timing {
-                _ = timing.measure("excerpt") {
-                    if let paragraphs = try? articleContent.select("p"),
-                       let firstPara = paragraphs.first() {
-                        let excerpt = textContentPreservingWhitespace(of: firstPara)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !excerpt.isEmpty {
-                            metadata.excerpt = excerpt
-                        }
-                    }
-                }
-            } else {
+            measured("excerpt", by: timing) {
                 if let paragraphs = try? articleContent.select("p"),
                    let firstPara = paragraphs.first() {
                     let excerpt = textContentPreservingWhitespace(of: firstPara)
@@ -421,19 +445,10 @@ private extension Readability {
             }
         }
 
-        let lang: String?
-        if let timing {
-            lang = timing.measure("lang") {
-                guard let html = try? document.select("html").first() else { return nil }
-                let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
-                return value.isEmpty ? nil : value
-            }
-        } else {
-            lang = {
-                guard let html = try? document.select("html").first() else { return nil }
-                let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
-                return value.isEmpty ? nil : value
-            }()
+        let lang: String? = measured("lang", by: timing) {
+            guard let html = try? document.select("html").first() else { return nil }
+            let value = String(decoding: html.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
+            return value.isEmpty ? nil : value
         }
 
         debugLog(["Grabbed:", articleContent])
@@ -444,6 +459,8 @@ private extension Readability {
             metadata: metadata,
             readerable: readerable,
             lang: lang,
+            articleByline: articleGrabber.articleByline,
+            articleDirection: articleGrabber.articleDir,
             isLiveDocument: isLiveDocument
         )
     }

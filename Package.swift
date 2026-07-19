@@ -17,13 +17,21 @@ let package = Package(
             name: "SwiftReadability",
             targets: ["SwiftReadability"]
         ),
+        .library(
+            name: "SwiftReadabilityJavaScriptReference",
+            targets: ["SwiftReadabilityJavaScriptReference"]
+        ),
         .executable(
             name: "SwiftReadabilityBench",
             targets: ["SwiftReadabilityBench"]
         ),
+        .executable(
+            name: "SwiftReadabilityContract",
+            targets: ["SwiftReadabilityContract"]
+        ),
     ],
     dependencies: [
-        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.13.5")
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.6")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -32,25 +40,39 @@ let package = Package(
             name: "SwiftReadability",
             dependencies: [
                 .product(name: "SwiftSoup", package: "SwiftSoup")
-            ],
+            ]
+        ),
+        .target(
+            name: "SwiftReadabilityJavaScriptReference",
             resources: [
                 .copy("Resources/Readability.js"),
                 .copy("Resources/Readability-readerable.js")
             ]
         ),
+        .target(name: "SwiftReadabilityFixtureSupport"),
         .executableTarget(
             name: "SwiftReadabilityBench",
             dependencies: [
-                "SwiftReadability"
+                "SwiftReadability",
+                "SwiftReadabilityFixtureSupport"
+            ]
+        ),
+        .executableTarget(
+            name: "SwiftReadabilityContract",
+            dependencies: [
+                "SwiftReadability",
+                "SwiftReadabilityFixtureSupport"
             ]
         ),
         .testTarget(
             name: "SwiftReadabilityTests",
             dependencies: [
-                "SwiftReadability"
+                "SwiftReadability",
+                "SwiftReadabilityJavaScriptReference",
+                "SwiftReadabilityFixtureSupport"
             ],
-            exclude: [
-                "Fixtures"
+            resources: [
+                .copy("Fixtures")
             ]
         ),
     ]

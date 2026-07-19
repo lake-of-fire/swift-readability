@@ -157,8 +157,9 @@ final class ArticleGrabber: ProcessorBase {
         options: [.caseInsensitive]
     )
 
-    private let options: ReadabilityOptions
     private let regEx: RegExUtil
+    private let extensions: ReadabilityExtensions
+    private let publisherChromeCleaner: PublisherChromeCleaner
 
     private(set) var articleByline: String?
     private(set) var articleDir: String?
@@ -173,11 +174,18 @@ final class ArticleGrabber: ProcessorBase {
     private final class LinkDensityCache {
         var map: [ObjectIdentifier: Double] = [:]
         var textMutationVersion: Int = -1
+
+        func reset() {
+            map.removeAll(keepingCapacity: true)
+            textMutationVersion = -1
+        }
     }
 
-    init(options: ReadabilityOptions, regEx: RegExUtil = RegExUtil()) {
-        self.options = options
+    init(options: ReadabilityOptions, regEx: RegExUtil? = nil) {
+        let regEx = regEx ?? RegExUtil(options: options)
         self.regEx = regEx
+        self.extensions = options.extensions
+        self.publisherChromeCleaner = PublisherChromeCleaner(regEx: regEx)
         self.nbTopCandidates = options.nbTopCandidates
         self.charThreshold = options.charThreshold
         self.linkDensityModifier = options.linkDensityModifier
@@ -188,6 +196,13 @@ final class ArticleGrabber: ProcessorBase {
                      options: ArticleGrabberOptions = ArticleGrabberOptions(),
                      pageElement: Element? = nil,
                      timing: TimingSink? = nil) -> Element? {
+        // A grabber may be reused by internal clients. Every value below belongs
+        // to one extraction, so reset it before touching a new document.
+        articleByline = nil
+        articleDir = nil
+        readabilityObjects.removeAll(keepingCapacity: true)
+        readabilityDataTable.removeAll(keepingCapacity: true)
+
         var options = options
         let isPaging = pageElement != nil
         let page = pageElement ?? doc.body()
@@ -204,80 +219,39 @@ final class ArticleGrabber: ProcessorBase {
         var textLengthCache: [ObjectIdentifier: Int] = [:]
         let linkDensityCache = LinkDensityCache()
         while true {
-            let elementsToScore: [Element]
-            if let timing {
-                elementsToScore = timing.measure("grab.prepareNodes") {
-                    prepareNodes(
-                        doc: doc,
-                        metadata: metadata,
-                        options: options,
-                        timing: timing,
-                        textLengthCache: &textLengthCache,
-                        linkDensityCache: linkDensityCache
-                    )
-                }
-            } else {
-                elementsToScore = prepareNodes(
+            let elementsToScore = measured("grab.prepareNodes", by: timing) {
+                prepareNodes(
                     doc: doc,
                     metadata: metadata,
                     options: options,
+                    timing: timing,
                     textLengthCache: &textLengthCache,
                     linkDensityCache: linkDensityCache
                 )
             }
 
-            let candidates: [Element]
-            if let timing {
-                candidates = timing.measure("grab.scoreElements") {
-                    scoreElements(
-                        elementsToScore: elementsToScore,
-                        options: options,
-                        timing: timing,
-                        textLengthCache: &textLengthCache
-                    )
-                }
-            } else {
-                candidates = scoreElements(
+            let candidates = measured("grab.scoreElements", by: timing) {
+                scoreElements(
                     elementsToScore: elementsToScore,
                     options: options,
+                    timing: timing,
                     textLengthCache: &textLengthCache
                 )
             }
 
-            let (topCandidate, created): (Element, Bool)
-            if let timing {
-                (topCandidate, created) = timing.measure("grab.getTopCandidate") {
-                    getTopCandidate(
-                        page: page,
-                        candidates: candidates,
-                        options: options,
-                        timing: timing,
-                        textLengthCache: &textLengthCache,
-                        linkDensityCache: linkDensityCache
-                    )
-                }
-            } else {
-                (topCandidate, created) = getTopCandidate(
+            let (topCandidate, created) = measured("grab.getTopCandidate", by: timing) {
+                getTopCandidate(
                     page: page,
                     candidates: candidates,
                     options: options,
+                    timing: timing,
                     textLengthCache: &textLengthCache,
                     linkDensityCache: linkDensityCache
                 )
             }
 
-            let articleContent: Element
-            if let timing {
-                articleContent = timing.measure("grab.createArticleContent") {
-                    createArticleContent(
-                        doc: doc,
-                        topCandidate: topCandidate,
-                        isPaging: isPaging,
-                        linkDensityCache: linkDensityCache
-                    )
-                }
-            } else {
-                articleContent = createArticleContent(
+            let articleContent = measured("grab.createArticleContent", by: timing) {
+                createArticleContent(
                     doc: doc,
                     topCandidate: topCandidate,
                     isPaging: isPaging,
@@ -285,22 +259,13 @@ final class ArticleGrabber: ProcessorBase {
                 )
             }
 
-            if let timing {
-                _ = timing.measure("grab.prepArticle") {
-                    prepArticle(
-                        articleContent: articleContent,
-                        options: options,
-                        metadata: metadata,
-                        timing: timing,
-                        linkDensityCache: linkDensityCache
-                    )
-                }
-            } else {
+            measured("grab.prepArticle", by: timing) {
                 prepArticle(
                     articleContent: articleContent,
                     options: options,
                     metadata: metadata,
-                        linkDensityCache: linkDensityCache
+                    timing: timing,
+                    linkDensityCache: linkDensityCache
                 )
             }
 
@@ -324,6 +289,8 @@ final class ArticleGrabber: ProcessorBase {
                 // dictionaries must be cleared between attempts to avoid stale lookups (and pointer reuse).
                 readabilityObjects.removeAll(keepingCapacity: true)
                 readabilityDataTable.removeAll(keepingCapacity: true)
+                textLengthCache.removeAll(keepingCapacity: true)
+                linkDensityCache.reset()
 
                 if options.stripUnlikelyCandidates {
                     options.stripUnlikelyCandidates = false
@@ -345,11 +312,7 @@ final class ArticleGrabber: ProcessorBase {
                 }
             }
 
-            if let timing {
-                _ = timing.measure("grab.getTextDirection") {
-                    getTextDirection(topCandidate: topCandidate, doc: doc)
-                }
-            } else {
+            measured("grab.getTextDirection", by: timing) {
                 getTextDirection(topCandidate: topCandidate, doc: doc)
             }
             return articleContent
@@ -372,11 +335,11 @@ final class ArticleGrabber: ProcessorBase {
             let currentTagName = current.tagNameUTF8()
             let matchString = current.classNameSafe() + " " + current.idSafe()
 
-            let isVisible = timing?.measure("grab.prepareNodes.visibility") {
+            let isVisible = measured("grab.prepareNodes.visibility", by: timing) {
                 isProbablyVisible(current)
-            } ?? isProbablyVisible(current)
+            }
             if !isVisible {
-                node = removeAndGetNext(node: current, reason: "hidden")
+                node = removeAndGetNext(node: current)
                 continue
             }
 
@@ -385,33 +348,31 @@ final class ArticleGrabber: ProcessorBase {
             let role = current.attrOrEmptyUTF8(ReadabilityUTF8Arrays.role)
             if ariaModal.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.true_),
                role.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.dialog) {
-                node = removeAndGetNext(node: current, reason: "aria-modal dialog")
+                node = removeAndGetNext(node: current)
                 continue
             }
 
-            let isByline = timing?.measure("grab.prepareNodes.byline") {
+            let isByline = measured("grab.prepareNodes.byline", by: timing) {
                 checkByline(node: current, matchString: matchString, metadata: metadata)
-            } ?? checkByline(node: current, matchString: matchString, metadata: metadata)
+            }
             if isByline {
-                node = removeAndGetNext(node: current, reason: "byline")
+                node = removeAndGetNext(node: current)
                 continue
             }
 
-            let headerDup = timing?.measure("grab.prepareNodes.headerDup") {
+            let headerDup = measured("grab.prepareNodes.headerDup", by: timing) {
                 shouldRemoveTitleHeader &&
                 !articleTitle.isEmpty &&
                 headerDuplicatesTitle(node: current, articleTitle: articleTitle)
-            } ?? (shouldRemoveTitleHeader &&
-                  !articleTitle.isEmpty &&
-                  headerDuplicatesTitle(node: current, articleTitle: articleTitle))
+            }
             if headerDup {
                 shouldRemoveTitleHeader = false
-                node = removeAndGetNext(node: current, reason: "header duplicates title")
+                node = removeAndGetNext(node: current)
                 continue
             }
 
             if options.stripUnlikelyCandidates {
-                let isUnlikely = timing?.measure("grab.prepareNodes.unlikely") {
+                let isUnlikely = measured("grab.prepareNodes.unlikely", by: timing) {
                     guard currentTagName != ReadabilityUTF8Arrays.body,
                           currentTagName != ReadabilityUTF8Arrays.a else { return false }
                     if !regEx.isUnlikelyCandidate(matchString) { return false }
@@ -419,28 +380,19 @@ final class ArticleGrabber: ProcessorBase {
                     if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.table) { return false }
                     if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.code) { return false }
                     return true
-                } ?? {
-                    guard currentTagName != ReadabilityUTF8Arrays.body,
-                          currentTagName != ReadabilityUTF8Arrays.a else { return false }
-                    if !regEx.isUnlikelyCandidate(matchString) { return false }
-                    if regEx.okMaybeItsACandidate(matchString) { return false }
-                    if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.table) { return false }
-                    if hasAncestorTag(node: current, tagName: ReadabilityUTF8Arrays.code) { return false }
-                    return true
-                }()
+                }
                 if isUnlikely {
-                    node = removeAndGetNext(node: current, reason: "Removing unlikely candidate")
+                    node = removeAndGetNext(node: current)
                     continue
                 }
 
                 if unlikelyRoles.contains(where: { role.equalsIgnoreCaseASCII($0) }) {
-                    let roleString = String(decoding: role, as: UTF8.self)
-                    node = removeAndGetNext(node: current, reason: "unlikely role " + roleString)
+                    node = removeAndGetNext(node: current)
                     continue
                 }
             }
 
-            let noContent = timing?.measure("grab.prepareNodes.noContent") {
+            let noContent = measured("grab.prepareNodes.noContent", by: timing) {
                 (currentTagName == ReadabilityUTF8Arrays.div ||
                 currentTagName == ReadabilityUTF8Arrays.section ||
                 currentTagName == ReadabilityUTF8Arrays.header ||
@@ -451,18 +403,9 @@ final class ArticleGrabber: ProcessorBase {
                 currentTagName == ReadabilityUTF8Arrays.h5 ||
                 currentTagName == ReadabilityUTF8Arrays.h6) &&
                 isElementWithoutContent(node: current)
-            } ?? ((currentTagName == ReadabilityUTF8Arrays.div ||
-                    currentTagName == ReadabilityUTF8Arrays.section ||
-                    currentTagName == ReadabilityUTF8Arrays.header ||
-                    currentTagName == ReadabilityUTF8Arrays.h1 ||
-                    currentTagName == ReadabilityUTF8Arrays.h2 ||
-                    currentTagName == ReadabilityUTF8Arrays.h3 ||
-                    currentTagName == ReadabilityUTF8Arrays.h4 ||
-                    currentTagName == ReadabilityUTF8Arrays.h5 ||
-                    currentTagName == ReadabilityUTF8Arrays.h6) &&
-                    isElementWithoutContent(node: current))
+            }
             if noContent {
-                node = removeAndGetNext(node: current, reason: "node without content")
+                node = removeAndGetNext(node: current)
                 continue
             }
 
@@ -471,17 +414,13 @@ final class ArticleGrabber: ProcessorBase {
             }
 
             if currentTagName == ReadabilityUTF8Arrays.div {
-                if let timing {
-                    _ = timing.measure("grab.prepareNodes.phrasing") {
-                        putPhrasingContentIntoParagraphs(div: current)
-                    }
-                } else {
+                measured("grab.prepareNodes.phrasing", by: timing) {
                     putPhrasingContentIntoParagraphs(div: current)
                 }
 
-                let hasSingleP = timing?.measure("grab.prepareNodes.hasSingleP") {
+                let hasSingleP = measured("grab.prepareNodes.hasSingleP", by: timing) {
                     hasSinglePInsideElement(element: current)
-                } ?? hasSinglePInsideElement(element: current)
+                }
                 if hasSingleP {
                     let currentTextLength = textLength(
                         of: current,
@@ -671,7 +610,15 @@ final class ArticleGrabber: ProcessorBase {
             current.reserveCapacity(text.count)
 
             for scalar in text.unicodeScalars {
-                let isWordChar = CharacterSet.alphanumerics.contains(scalar) || scalar.value == 95
+                // Mozilla splits on JavaScript's non-Unicode `/\W+/`: its `\w`
+                // is exactly ASCII letters, digits, and underscore. Treating all
+                // Unicode letters as word characters changes title-header removal
+                // for CJK pages even when the source strings are identical.
+                let value = scalar.value
+                let isWordChar = (48...57).contains(value) ||
+                    (65...90).contains(value) ||
+                    (97...122).contains(value) ||
+                    value == 95
                 if isWordChar {
                     current.append(Character(scalar))
                 } else if !current.isEmpty {
@@ -694,36 +641,6 @@ final class ArticleGrabber: ProcessorBase {
         guard !joinedAllB.isEmpty else { return 0 }
         let distanceB = Double(joinedUniqB.utf16.count) / Double(joinedAllB.utf16.count)
         return 1 - distanceB
-    }
-
-    private func textContentPreservingWhitespace(of node: Node) -> String {
-        if let text = node as? TextNode {
-            return text.getWholeText()
-        }
-        if let element = node as? Element {
-            return collectTextPreservingWhitespace(from: element)
-        }
-        return ""
-    }
-
-    private func collectTextPreservingWhitespace(from element: Element) -> String {
-        var output: [String] = []
-        output.reserveCapacity(8)
-        var stack = Array(element.getChildNodes().reversed())
-        while let node = stack.popLast() {
-            if let text = node as? TextNode {
-                output.append(text.getWholeText())
-            } else if let data = node as? DataNode {
-                output.append(data.getWholeData())
-            } else if let el = node as? Element {
-                let children = el.getChildNodes()
-                if !children.isEmpty {
-                    stack.append(contentsOf: children.reversed())
-                }
-            }
-        }
-        if output.isEmpty { return "" }
-        return output.joined()
     }
 
     private func isElementWithoutContent(node: Element) -> Bool {
@@ -768,27 +685,24 @@ final class ArticleGrabber: ProcessorBase {
         var candidates: [Element] = []
         for element in elementsToScore {
             if element.parent() == nil { continue }
-            let innerText = timing?.measure("grab.scoreElements.innerText") {
+            let innerText = measured("grab.scoreElements.innerText", by: timing) {
                 getInnerText(element, regEx: regEx)
-            } ?? getInnerText(element, regEx: regEx)
+            }
             let key = ObjectIdentifier(element)
             if textLengthCache[key] == nil {
                 textLengthCache[key] = innerText.count
             }
             if isTextLengthLessThan(innerText, 25) { continue }
-            let ancestors = timing?.measure("grab.scoreElements.ancestors") {
+            let ancestors = measured("grab.scoreElements.ancestors", by: timing) {
                 getNodeAncestors(node: element, maxDepth: 5)
-            } ?? getNodeAncestors(node: element, maxDepth: 5)
+            }
             if ancestors.isEmpty { continue }
 
             var contentScore = 1.0
-            let commasCount = timing?.measure("grab.scoreElements.commas") {
+            let commasCount = measured("grab.scoreElements.commas", by: timing) {
                 let commasRange = NSRange(location: 0, length: innerText.utf16.count)
                 return commasPattern.numberOfMatches(in: innerText, options: [], range: commasRange)
-            } ?? {
-                let commasRange = NSRange(location: 0, length: innerText.utf16.count)
-                return commasPattern.numberOfMatches(in: innerText, options: [], range: commasRange)
-            }()
+            }
             contentScore += Double(commasCount + 1)
             if innerText.utf8.count >= 100 {
                 contentScore += min(floor(Double(innerText.count) / 100.0), 3.0)
@@ -946,9 +860,9 @@ final class ArticleGrabber: ProcessorBase {
 
         for candidate in candidates {
             guard let readability = getReadabilityObject(element: candidate) else { continue }
-            let candidateTextLength = timing?.measure("grab.getTopCandidate.innerText") {
+            let candidateTextLength = measured("grab.getTopCandidate.innerText", by: timing) {
                 textLength(of: candidate, normalizeSpaces: true, cache: &textLengthCache)
-            } ?? textLength(of: candidate, normalizeSpaces: true, cache: &textLengthCache)
+            }
             let candidateScore = readability.contentScore * (1 - getLinkDensity(
                 element: candidate,
                 textLength: candidateTextLength,
@@ -984,16 +898,7 @@ final class ArticleGrabber: ProcessorBase {
             var parentOfTop = topCandidate!.parent()
             var alternativeAncestors: [[Element]] = []
             if let topScore = getReadabilityObject(element: topCandidate!)?.contentScore {
-                if let timing {
-                    _ = timing.measure("grab.getTopCandidate.altAncestors") {
-                        for other in topCandidates where other != topCandidate! {
-                            if let otherScore = getReadabilityObject(element: other)?.contentScore,
-                               otherScore / topScore >= 0.75 {
-                                alternativeAncestors.append(getNodeAncestors(node: other))
-                            }
-                        }
-                    }
-                } else {
+                measured("grab.getTopCandidate.altAncestors", by: timing) {
                     for other in topCandidates where other != topCandidate! {
                         if let otherScore = getReadabilityObject(element: other)?.contentScore,
                            otherScore / topScore >= 0.75 {
@@ -1071,13 +976,8 @@ final class ArticleGrabber: ProcessorBase {
         let textLength = textLength ?? getInnerText(element, regEx: regEx).count
         if textLength == 0 { return 0.0 }
         var linkLength = 0.0
-        let links: Elements?
-        if let timing {
-            links = timing.measure("grab.getLinkDensity.select") {
-                try? element.select("a")
-            }
-        } else {
-            links = try? element.select("a")
+        let links: Elements? = measured("grab.getLinkDensity.select", by: timing) {
+            try? element.select("a")
         }
         if let links {
             var textCache: [ObjectIdentifier: Int] = [:]
@@ -1091,9 +991,9 @@ final class ArticleGrabber: ProcessorBase {
                 if let cached = textCache[identifier] {
                     linkTextLength = cached
                 } else {
-                    linkTextLength = timing?.measure("grab.getLinkDensity.innerText") {
+                    linkTextLength = measured("grab.getLinkDensity.innerText", by: timing) {
                         getInnerText(link, regEx: regEx).count
-                    } ?? getInnerText(link, regEx: regEx).count
+                    }
                     textCache[identifier] = linkTextLength
                 }
                 if linkTextLength == 0 { continue }
@@ -1167,7 +1067,8 @@ final class ArticleGrabber: ProcessorBase {
     }
 
     private func isReadabilityCarousel(_ element: Element) -> Bool {
-        element.attrOrEmpty("data-readability-carousel").caseInsensitiveCompare("true") == .orderedSame
+        guard extensions.contains(.imageCarouselRecovery) else { return false }
+        return element.attrOrEmpty("data-readability-carousel").caseInsensitiveCompare("true") == .orderedSame
     }
 
     // MARK: Fifth step: prep article
@@ -1176,33 +1077,33 @@ final class ArticleGrabber: ProcessorBase {
                              metadata: ArticleMetadata,
                              timing: TimingSink? = nil,
                              linkDensityCache: LinkDensityCache) {
-        if let timing {
-            _ = timing.measure("grab.cleanStyles") { cleanStyles(e: articleContent) }
-            _ = timing.measure("grab.markDataTables") { markDataTables(root: articleContent) }
-            _ = timing.measure("grab.fixLazyImages") { fixLazyImages(root: articleContent) }
-        } else {
-            cleanStyles(e: articleContent)
-            markDataTables(root: articleContent)
-            fixLazyImages(root: articleContent)
-        }
+        measured("grab.cleanStyles", by: timing) { cleanStyles(e: articleContent) }
+        measured("grab.markDataTables", by: timing) { markDataTables(root: articleContent) }
+        measured("grab.fixLazyImages", by: timing) { fixLazyImages(root: articleContent) }
 
-        if let timing {
-            _ = timing.measure("grab.cleanConditionally.form") { cleanConditionally(e: articleContent, tag: "form", options: options, timing: timing, linkDensityCache: linkDensityCache) }
-            _ = timing.measure("grab.cleanConditionally.fieldset") { cleanConditionally(e: articleContent, tag: "fieldset", options: options, timing: timing, linkDensityCache: linkDensityCache) }
-            _ = timing.measure("grab.clean.object") { clean(e: articleContent, tag: "object") }
-            _ = timing.measure("grab.clean.embed") { clean(e: articleContent, tag: "embed") }
-            _ = timing.measure("grab.clean.footer") { clean(e: articleContent, tag: "footer") }
-            _ = timing.measure("grab.clean.link") { clean(e: articleContent, tag: "link") }
-            _ = timing.measure("grab.clean.aside") { clean(e: articleContent, tag: "aside") }
-        } else {
-            cleanConditionally(e: articleContent, tag: "form", options: options, linkDensityCache: linkDensityCache)
-            cleanConditionally(e: articleContent, tag: "fieldset", options: options, linkDensityCache: linkDensityCache)
-            clean(e: articleContent, tag: "object")
-            clean(e: articleContent, tag: "embed")
-            clean(e: articleContent, tag: "footer")
-            clean(e: articleContent, tag: "link")
-            clean(e: articleContent, tag: "aside")
+        measured("grab.cleanConditionally.form", by: timing) {
+            cleanConditionally(
+                e: articleContent,
+                tag: "form",
+                options: options,
+                timing: timing,
+                linkDensityCache: linkDensityCache
+            )
         }
+        measured("grab.cleanConditionally.fieldset", by: timing) {
+            cleanConditionally(
+                e: articleContent,
+                tag: "fieldset",
+                options: options,
+                timing: timing,
+                linkDensityCache: linkDensityCache
+            )
+        }
+        measured("grab.clean.object", by: timing) { clean(e: articleContent, tag: "object") }
+        measured("grab.clean.embed", by: timing) { clean(e: articleContent, tag: "embed") }
+        measured("grab.clean.footer", by: timing) { clean(e: articleContent, tag: "footer") }
+        measured("grab.clean.link", by: timing) { clean(e: articleContent, tag: "link") }
+        measured("grab.clean.aside", by: timing) { clean(e: articleContent, tag: "aside") }
 
         let shareRegex = try! NSRegularExpression(pattern: "(\\b|_)(share|sharedaddy)(\\b|_)", options: [.caseInsensitive])
         let shareElementThreshold = ReadabilityOptions.defaultCharThreshold
@@ -1212,32 +1113,57 @@ final class ArticleGrabber: ProcessorBase {
                 if shareRegex.firstMatch(in: matchString, options: [], range: range) == nil {
                     return false
                 }
-                let text = self.textContentPreservingWhitespace(of: node)
+                let text = textContentPreservingWhitespace(of: node)
                 return self.isTextLengthLessThan(text, shareElementThreshold)
             }
         }
-        cleanArticleChrome(articleContent: articleContent, metadata: metadata, linkDensityCache: linkDensityCache)
+        if extensions.contains(.publisherChromeCleanup) {
+            publisherChromeCleaner.clean(
+                articleContent: articleContent,
+                articleTitle: metadata.title,
+                creatorNames: metadata.creatorNames,
+                titleMatcher: { [self] heading, articleTitle in
+                    headerDuplicatesTitle(node: heading, articleTitle: articleTitle)
+                },
+                linkDensity: { [self] element, textLength in
+                    getLinkDensity(element: element, textLength: textLength, cache: linkDensityCache)
+                }
+            )
+        }
 
-        if let timing {
-            _ = timing.measure("grab.clean.iframe") { clean(e: articleContent, tag: "iframe") }
-            _ = timing.measure("grab.clean.input") { clean(e: articleContent, tag: "input") }
-            _ = timing.measure("grab.clean.textarea") { clean(e: articleContent, tag: "textarea") }
-            _ = timing.measure("grab.clean.select") { clean(e: articleContent, tag: "select") }
-            _ = timing.measure("grab.clean.button") { clean(e: articleContent, tag: "button") }
-            _ = timing.measure("grab.cleanHeaders") { cleanHeaders(e: articleContent, options: options) }
-            _ = timing.measure("grab.cleanConditionally.table") { cleanConditionally(e: articleContent, tag: "table", options: options, timing: timing, linkDensityCache: linkDensityCache) }
-            _ = timing.measure("grab.cleanConditionally.ul") { cleanConditionally(e: articleContent, tag: "ul", options: options, timing: timing, linkDensityCache: linkDensityCache) }
-            _ = timing.measure("grab.cleanConditionally.div") { cleanConditionally(e: articleContent, tag: "div", options: options, metadata: metadata, timing: timing, linkDensityCache: linkDensityCache) }
-        } else {
-            clean(e: articleContent, tag: "iframe")
-            clean(e: articleContent, tag: "input")
-            clean(e: articleContent, tag: "textarea")
-            clean(e: articleContent, tag: "select")
-            clean(e: articleContent, tag: "button")
-            cleanHeaders(e: articleContent, options: options)
-            cleanConditionally(e: articleContent, tag: "table", options: options, linkDensityCache: linkDensityCache)
-            cleanConditionally(e: articleContent, tag: "ul", options: options, linkDensityCache: linkDensityCache)
-            cleanConditionally(e: articleContent, tag: "div", options: options, metadata: metadata, linkDensityCache: linkDensityCache)
+        measured("grab.clean.iframe", by: timing) { clean(e: articleContent, tag: "iframe") }
+        measured("grab.clean.input", by: timing) { clean(e: articleContent, tag: "input") }
+        measured("grab.clean.textarea", by: timing) { clean(e: articleContent, tag: "textarea") }
+        measured("grab.clean.select", by: timing) { clean(e: articleContent, tag: "select") }
+        measured("grab.clean.button", by: timing) { clean(e: articleContent, tag: "button") }
+        measured("grab.cleanHeaders", by: timing) { cleanHeaders(e: articleContent, options: options) }
+        measured("grab.cleanConditionally.table", by: timing) {
+            cleanConditionally(
+                e: articleContent,
+                tag: "table",
+                options: options,
+                timing: timing,
+                linkDensityCache: linkDensityCache
+            )
+        }
+        measured("grab.cleanConditionally.ul", by: timing) {
+            cleanConditionally(
+                e: articleContent,
+                tag: "ul",
+                options: options,
+                timing: timing,
+                linkDensityCache: linkDensityCache
+            )
+        }
+        measured("grab.cleanConditionally.div", by: timing) {
+            cleanConditionally(
+                e: articleContent,
+                tag: "div",
+                options: options,
+                metadata: metadata,
+                timing: timing,
+                linkDensityCache: linkDensityCache
+            )
         }
 
         // Replace H1 with H2 as H1 should be only title that is displayed separately.
@@ -1246,7 +1172,18 @@ final class ArticleGrabber: ProcessorBase {
                 _ = try? h1.tagName("h2")
             }
         }
-        removeLeadingCompactTextChrome(from: articleContent, linkDensityCache: linkDensityCache)
+        if extensions.contains(.publisherChromeCleanup) {
+            var phrasingCache: [ObjectIdentifier: Bool] = [:]
+            publisherChromeCleaner.removeLeadingCompactTextChrome(
+                from: articleContent,
+                isPhrasingContent: { [self] element in
+                    isPhrasingContent(element, cache: &phrasingCache)
+                },
+                linkDensity: { [self] element, textLength in
+                    getLinkDensity(element: element, textLength: textLength, cache: linkDensityCache)
+                }
+            )
+        }
 
         removeNodes(in: articleContent, tagName: "p") { paragraph in
             let imgCount = (try? paragraph.getElementsByTag("img").count) ?? 0
@@ -1473,13 +1410,8 @@ final class ArticleGrabber: ProcessorBase {
         let selector = tags
             .map { $0.lowercased() }
             .joined(separator: ",")
-        let children: Elements?
-        if let timing {
-            children = timing.measure("grab.getTextDensity.select") {
-                try? element.select(selector)
-            }
-        } else {
-            children = try? element.select(selector)
+        let children: Elements? = measured("grab.getTextDensity.select", by: timing) {
+            try? element.select(selector)
         }
         guard !selector.isEmpty, let children else { return 0 }
 
@@ -1494,9 +1426,9 @@ final class ArticleGrabber: ProcessorBase {
             if let cached = textCache[identifier] {
                 childLength = cached
             } else {
-                childLength = timing?.measure("grab.getTextDensity.innerText") {
+                childLength = measured("grab.getTextDensity.innerText", by: timing) {
                     getInnerText(child, regEx: regEx, normalizeSpaces: true).count
-                } ?? getInnerText(child, regEx: regEx, normalizeSpaces: true).count
+                }
                 textCache[identifier] = childLength
             }
             childrenLength += childLength
@@ -1518,20 +1450,15 @@ final class ArticleGrabber: ProcessorBase {
                 self.getReadabilityDataTable(element: element)
             }
             var isList = initialIsList
-            let innerText = timing?.measure("grab.cleanConditionally.innerText") {
+            let innerText = measured("grab.cleanConditionally.innerText", by: timing) {
                 self.getInnerText(node, regEx: self.regEx)
-            } ?? self.getInnerText(node, regEx: self.regEx)
+            }
             let innerTextLength = innerText.count
             var nodeLength = 0
             if !isList {
                 nodeLength = innerTextLength
-                let listNodes: Elements?
-                if let timing {
-                    listNodes = timing.measure("grab.cleanConditionally.listSelect") {
-                        try? node.select("ul, ol")
-                    }
-                } else {
-                    listNodes = try? node.select("ul, ol")
+                let listNodes: Elements? = measured("grab.cleanConditionally.listSelect", by: timing) {
+                    try? node.select("ul, ol")
                 }
                 if nodeLength > 0, let listNodes {
                     var listLength = 0
@@ -1574,13 +1501,8 @@ final class ArticleGrabber: ProcessorBase {
                     timing: timing
                 )
                 var embedCount = 0
-                let embeds: Elements?
-                if let timing {
-                    embeds = timing.measure("grab.cleanConditionally.embedsSelect") {
-                        try? node.select("object, embed, iframe")
-                    }
-                } else {
-                    embeds = try? node.select("object, embed, iframe")
+                let embeds: Elements? = measured("grab.cleanConditionally.embedsSelect", by: timing) {
+                    try? node.select("object, embed, iframe")
                 }
                 if let embeds {
                     for embed in embeds {
@@ -1604,7 +1526,8 @@ final class ArticleGrabber: ProcessorBase {
                     timing: timing,
                     cache: linkDensityCache
                 )
-                if self.shouldPreserveLikelyArticleBody(
+                if self.extensions.contains(.articleBodyPreservation),
+                   self.shouldPreserveLikelyArticleBody(
                     node,
                     tag: tag,
                     paragraphCount: p,
@@ -1625,7 +1548,8 @@ final class ArticleGrabber: ProcessorBase {
                 let textDensity = self.getTextDensity(node, tags: Array(textishTags), textLength: innerTextLength, timing: timing)
                 let isFigureChild = self.hasAncestorTag(node: node, tagName: ReadabilityUTF8Arrays.figure)
                 let linkDensityModifier = self.linkDensityModifier
-                let hasSignificantMedia = self.hasSignificantMediaContent(in: node, imgCount: img)
+                let hasSignificantMedia = self.extensions.contains(.significantMediaPreservation) &&
+                    self.hasSignificantMediaContent(in: node, imgCount: img)
 
                 var haveToRemove = false
                 if !isFigureChild && img > 1 && Double(p) / Double(img) < 0.5 {
@@ -1699,289 +1623,6 @@ final class ArticleGrabber: ProcessorBase {
             .lowercased()
     }
 
-    private let actionComponentPattern = try! NSRegularExpression(
-        pattern: "(print|mail|facebook|twitter|hatena|bookmark|share|dialog).*",
-        options: [.caseInsensitive]
-    )
-    private let subscriptionComponentPattern = try! NSRegularExpression(
-        pattern: "(paid|subscribe|register|login)",
-        options: [.caseInsensitive]
-    )
-    private let profileComponentPattern = try! NSRegularExpression(
-        pattern: "^(writer|author)\\s*profile$",
-        options: [.caseInsensitive]
-    )
-    private let relatedSectionHeadingPattern = try! NSRegularExpression(
-        pattern: "(related|recommended|関連記事|関連トピック|ジャンル)",
-        options: [.caseInsensitive]
-    )
-    private let prLabelPattern = try! NSRegularExpression(
-        pattern: #"^\s*\[?\s*PR\s*\]?\s*$"#,
-        options: [.caseInsensitive]
-    )
-
-    private func cleanArticleChrome(articleContent: Element,
-                                    metadata: ArticleMetadata,
-                                    linkDensityCache: LinkDensityCache) {
-        removeDuplicateTitleChrome(articleContent: articleContent, metadata: metadata)
-
-        removeNodes(in: articleContent, tagName: "ul") { list in
-            self.isArticleActionList(list)
-        }
-
-        removeNodes(in: articleContent, tagName: "div") { node in
-            if self.isCompactNonPrintOrAdNode(node) { return true }
-            if self.isCreatorBylineChrome(node, creatorNames: metadata.creatorNames) { return true }
-            if self.isCompactRelatedSection(node, linkDensityCache: linkDensityCache) { return true }
-            return false
-        }
-
-        removeNodes(in: articleContent, tagName: "section") { node in
-            self.isCompactRelatedSection(node, linkDensityCache: linkDensityCache)
-        }
-
-        removeNodes(in: articleContent, tagName: "p") { paragraph in
-            self.isPRLabel(paragraph)
-        }
-
-        removeCompactComponentContainers(
-            in: articleContent,
-            componentPattern: subscriptionComponentPattern,
-            maximumTextLength: 500
-        )
-        removeComponentElements(
-            in: articleContent,
-            componentPattern: profileComponentPattern,
-            maximumTextLength: 800
-        )
-    }
-
-    private func removeDuplicateTitleChrome(articleContent: Element, metadata: ArticleMetadata) {
-        guard let articleTitle = metadata.title, !articleTitle.isEmpty else { return }
-
-        let normalizedTitle = articleTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let leadingArticleText = getInnerText(articleContent, regEx: regEx)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let headings = (try? articleContent.select("h1, h2").array()) ?? []
-        for heading in headings {
-            let headingText = getInnerText(heading, regEx: regEx)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let isDuplicate = headerDuplicatesTitle(node: heading, articleTitle: articleTitle) ||
-                (!headingText.isEmpty && normalizedTitle.hasPrefix(headingText))
-            // This is a fallback for title chrome that escaped the normal preparation
-            // pass. Restrict it to the leading visible text so a later section heading
-            // that merely resembles the document title is never removed.
-            guard isDuplicate,
-                  !headingText.isEmpty,
-                  leadingArticleText.hasPrefix(headingText) else { continue }
-
-            let wrapper = heading.parent()
-            printAndRemove(node: heading, reason: "header duplicates title")
-
-            guard let wrapper,
-                  wrapper !== articleContent,
-                  wrapper.children().count == 1,
-                  !wrapper.getChildNodes().contains(where: { node in
-                      guard let text = node as? TextNode else { return false }
-                      return regEx.hasContent(text.getWholeText())
-                  }),
-                  let onlyChild = wrapper.children().firstSafe
-            else { continue }
-
-            _ = try? onlyChild.remove()
-            _ = try? wrapper.replaceWith(onlyChild)
-        }
-    }
-
-    private func isArticleActionList(_ list: Element) -> Bool {
-        let dataContentType = list.attrOrEmpty("data-content-type")
-        let componentText = componentNames(in: list).joined(separator: " ")
-        let text = getInnerText(list, regEx: regEx)
-        let hasActionComponent = matches(actionComponentPattern, in: componentText)
-        let hasActionText = text.contains("印刷") ||
-            text.range(of: "share", options: .caseInsensitive) != nil ||
-            text.contains("シェア") ||
-            text.range(of: "facebook", options: .caseInsensitive) != nil ||
-            text.range(of: "twitter", options: .caseInsensitive) != nil
-
-        if dataContentType.caseInsensitiveCompare("Article") == .orderedSame,
-           hasActionComponent || hasActionText {
-            return true
-        }
-        if hasActionComponent, text.count < 300 {
-            return true
-        }
-        return false
-    }
-
-    private func isCompactNonPrintOrAdNode(_ node: Element) -> Bool {
-        let matchString = node.classNameSafe() + " " + node.idSafe()
-        let lower = matchString.lowercased()
-        guard lower.contains("notprint") || lower.contains("admod") else { return false }
-        return getInnerText(node, regEx: regEx).count < 500
-    }
-
-    private func isCreatorBylineChrome(_ node: Element, creatorNames: [String]) -> Bool {
-        guard !creatorNames.isEmpty else { return false }
-        let text = getInnerText(node, regEx: regEx)
-        guard !text.isEmpty, text.count <= 200 else { return false }
-        let compactText = compactedComparableText(text)
-        let compactCreatorNames = creatorNames
-            .map(compactedComparableText)
-            .filter { !$0.isEmpty }
-        guard !compactCreatorNames.isEmpty,
-              compactCreatorNames.allSatisfy(compactText.contains) else { return false }
-        guard ((try? node.select("h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) == 0 else {
-            return false
-        }
-        if compactText == compactCreatorNames.joined() {
-            return hasFollowingArticleBody(after: node)
-        }
-
-        // Many publishers group the date, access label, and JSON-LD creators in
-        // one compact metadata row. Matching every declared creator plus a real
-        // <time> element is a semantic signal and avoids guessing from CSS names.
-        let hasPublishedTime = ((try? node.select("time").count) ?? 0) > 0
-        return hasPublishedTime
-    }
-
-    private func removeLeadingCompactTextChrome(from articleContent: Element, linkDensityCache: LinkDensityCache) {
-        var current: Element? = articleContent
-        var phrasingCache: [ObjectIdentifier: Bool] = [:]
-        while let container = current, let firstChild = container.children().firstSafe {
-            if isPhrasingContent(firstChild, cache: &phrasingCache) {
-                break
-            }
-            if isCompactMediaActionChrome(firstChild, linkDensityCache: linkDensityCache) {
-                printAndRemove(node: firstChild, reason: "leading compact media action chrome")
-                continue
-            }
-            guard firstChild.children().count > 0 else { break }
-            current = firstChild
-        }
-    }
-
-    private func isCompactMediaActionChrome(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
-        let text = getInnerText(node, regEx: regEx)
-        guard text.count <= 250 else { return false }
-        let imageCount = (try? node.select("img").count) ?? 0
-        guard imageCount > 0, imageCount <= 4 else { return false }
-        if ((try? node.select("h1, h2, h3, h4, h5, h6, figure, picture, iframe, object, embed, input, button, select, textarea").count) ?? 0) > 0 {
-            return false
-        }
-        let linkCount = (try? node.select("a").count) ?? 0
-        let listCount = (try? node.select("ul, ol").count) ?? 0
-        let hasActionMarker = matches(actionComponentPattern, in: node.classNameSafe() + " " + node.idSafe())
-        guard linkCount > 0, listCount > 0 || hasActionMarker else {
-            return false
-        }
-        if text.count > 40 {
-            let linkDensity = getLinkDensity(element: node, textLength: text.count, cache: linkDensityCache)
-            guard linkDensity > 0.35 else { return false }
-        }
-        return hasFollowingArticleBody(after: node)
-    }
-
-    private func hasFollowingArticleBody(after node: Element) -> Bool {
-        var current: Element? = node
-        while let element = current, let parent = element.parent() {
-            var sibling = try? element.nextElementSibling()
-            while let candidate = sibling {
-                let text = getInnerText(candidate, regEx: regEx)
-                let hasMedia = ((try? candidate.select("img, figure, picture").count) ?? 0) > 0
-                if text.count >= 300 || (hasMedia && text.count >= 80) {
-                    return true
-                }
-                if text.count > 100 || hasMedia {
-                    return false
-                }
-                sibling = try? candidate.nextElementSibling()
-            }
-            current = parent
-        }
-        return false
-    }
-
-    private func isCompactRelatedSection(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
-        let text = getInnerText(node, regEx: regEx)
-        guard text.count < 500 else { return false }
-        let headingText = ((try? node.select("h1, h2, h3, h4, h5, h6").array()) ?? [])
-            .map { getInnerText($0, regEx: regEx) }
-            .joined(separator: " ")
-        guard matches(relatedSectionHeadingPattern, in: headingText) else { return false }
-        let linkDensity = getLinkDensity(element: node, textLength: text.count, cache: linkDensityCache)
-        return linkDensity > 0.15 || ((try? node.select("a").count) ?? 0) > 0
-    }
-
-    private func isPRLabel(_ paragraph: Element) -> Bool {
-        let text = getInnerText(paragraph, regEx: regEx)
-        return matches(prLabelPattern, in: text)
-    }
-
-    private func removeCompactComponentContainers(in articleContent: Element,
-                                                  componentPattern: NSRegularExpression,
-                                                  maximumTextLength: Int) {
-        let components = elements(in: articleContent).filter {
-            matches(componentPattern, in: $0.attrOrEmpty("x-component-name"))
-        }
-        for component in components {
-            var candidate: Element?
-            var current: Element? = component
-            while let element = current, element !== articleContent {
-                let tagName = element.tagNameUTF8()
-                if tagName == ReadabilityUTF8Arrays.div ||
-                    tagName == ReadabilityUTF8Arrays.section ||
-                    tagName == "aside".utf8Array {
-                    let textLength = getInnerText(element, regEx: regEx).count
-                    if textLength <= maximumTextLength {
-                        candidate = element
-                    }
-                }
-                current = element.parent()
-            }
-            if let candidate, candidate.parent() != nil {
-                printAndRemove(node: candidate, reason: "compact component chrome")
-            }
-        }
-    }
-
-    private func removeComponentElements(in articleContent: Element,
-                                         componentPattern: NSRegularExpression,
-                                         maximumTextLength: Int) {
-        let components = elements(in: articleContent).filter { component in
-            let componentName = component.attrOrEmpty("x-component-name")
-            return matches(componentPattern, in: componentName) &&
-                getInnerText(component, regEx: regEx).count <= maximumTextLength
-        }
-        for component in components where component.parent() != nil {
-            printAndRemove(node: component, reason: "component chrome")
-        }
-    }
-
-    private func componentNames(in element: Element) -> [String] {
-        elements(in: element).compactMap { node in
-            let value = node.attrOrEmpty("x-component-name")
-            return value.isEmpty ? nil : value
-        }
-    }
-
-    private func elements(in element: Element) -> [Element] {
-        var result: [Element] = []
-        var stack = [element]
-        while let current = stack.popLast() {
-            result.append(current)
-            let children = current.children()
-            for child in children.reversed() {
-                stack.append(child)
-            }
-        }
-        return result
-    }
-
-    private func matches(_ regex: NSRegularExpression, in text: String) -> Bool {
-        regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) != nil
-    }
-
     private func hasSignificantMediaContent(in node: Element, imgCount: Int) -> Bool {
         guard imgCount > 0 else { return false }
         let figureCount = (try? node.select("figure").count) ?? 0
@@ -2007,17 +1648,6 @@ final class ArticleGrabber: ProcessorBase {
             depth += 1
         }
         return false
-    }
-
-    private func getCharCount(node: Element, c: Character = ",") -> Int {
-        return getCharCount(text: getInnerText(node, regEx: regEx), c: c)
-    }
-
-    private func getCharCount(text: String, c: Character = ",") -> Int {
-        if let ascii = c.asciiValue {
-            return countOccurrences(text, ascii: ascii, max: nil)
-        }
-        return text.split(separator: c).count - 1
     }
 
     private let asciiComma: UInt8 = 44
@@ -2054,7 +1684,7 @@ final class ArticleGrabber: ProcessorBase {
         while let current = next, current != endOfSearchMarker {
             let matchString = current.classNameSafe() + " " + current.idSafe()
             if filter(current, matchString) {
-                next = removeAndGetNext(node: current, reason: "cleanMatchedNodes")
+                next = removeAndGetNext(node: current)
             } else {
                 next = getNextNode(node: current)
             }
@@ -2070,9 +1700,9 @@ final class ArticleGrabber: ProcessorBase {
     }
 
     // MARK: util
-    private func removeAndGetNext(node: Element, reason: String = "") -> Element? {
+    private func removeAndGetNext(node: Element) -> Element? {
         let nextNode = getNextNode(node: node, ignoreSelfAndKids: true)
-        printAndRemove(node: node, reason: reason)
+        printAndRemove(node: node)
         return nextNode
     }
 

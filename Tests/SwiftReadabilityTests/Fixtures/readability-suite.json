@@ -1,5 +1,12 @@
 {
   "baseURL": "http://fakehost/test/page.html",
+  "extensionProfiles": {
+    "asahi-junk-image": "publisherAdaptations",
+    "asahi-article-title-byline": "publisherAdaptations",
+    "web-japan-niponica38-feature02": "publisherAdaptations",
+    "hypebeast-inline-carousel": "publisherAdaptations",
+    "bepal-674158": "publisherAdaptations"
+  },
   "assertions": {
     "asahi-junk-image": {
       "textExcludes": [

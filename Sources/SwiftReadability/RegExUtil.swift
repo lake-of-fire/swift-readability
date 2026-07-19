@@ -2,27 +2,23 @@ import Foundation
 
 /// Regex helper mirroring Readability.js REGEXPS.
 final class RegExUtil {
-    static let unlikelyCandidatesDefaultPattern = "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote"
+    static let unlikelyCandidatesDefaultPattern = "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote"
+
+    static let unlikelyCandidatesConsumerApplicationPattern = "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote"
 
     static let okMaybeItsACandidateDefaultPattern = "and|article|body|column|content|main|mathjax|shadow"
 
     static let positiveDefaultPattern = "article|body|content|entry|hentry|h-entry|main|page|pagination|post|text|blog|story"
 
-    static let negativeDefaultPattern = "-ad-|admod|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|notprint|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget"
+    static let negativeDefaultPattern = "-ad-|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget"
 
-    static let extraneousDefaultPattern = "print|archive|comment|discuss|e[\\-]?mail|share|reply|all|login|sign|single|utility"
+    static let negativeConsumerApplicationPattern = "-ad-|admod|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|notprint|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget"
 
     static let bylineDefaultPattern = "byline|author|dateline|writtenby|p-author"
-
-    static let replaceFontsDefaultPattern = "<(/?)font[^>]*>"
 
     static let normalizeDefaultPattern = "\\s{2,}"
 
     static let videosDefaultPattern = "//(www\\.)?((dailymotion|youtube|youtube-nocookie|player\\.vimeo|v\\.qq|bilibili|live\\.bilibili)\\.com|(archive|upload\\.wikimedia)\\.org|player\\.twitch\\.tv)"
-
-    static let nextLinkDefaultPattern = "(next|weiter|continue|>([^\\|]|$)|»([^\\|]|$))"
-
-    static let prevLinkDefaultPattern = "(prev|earl|old|new|<|«)"
 
     static let whitespaceDefaultPattern = "^\\s*$"
 
@@ -32,28 +28,33 @@ final class RegExUtil {
     private let okMaybeItsACandidate: NSRegularExpression
     private let positive: NSRegularExpression
     private let negative: NSRegularExpression
-    private let extraneous: NSRegularExpression
     private let byline: NSRegularExpression
-    private let replaceFonts: NSRegularExpression
     private let normalize: NSRegularExpression
     private let videos: NSRegularExpression
-    private let nextLink: NSRegularExpression
-    private let prevLink: NSRegularExpression
     private let whitespace: NSRegularExpression
     private let hasContent: NSRegularExpression
+
+    convenience init(options: ReadabilityOptions) {
+        let publisherCleanup = options.extensions.contains(.publisherChromeCleanup)
+        self.init(
+            unlikelyCandidatesPattern: publisherCleanup
+                ? Self.unlikelyCandidatesConsumerApplicationPattern
+                : Self.unlikelyCandidatesDefaultPattern,
+            negativePattern: publisherCleanup
+                ? Self.negativeConsumerApplicationPattern
+                : Self.negativeDefaultPattern,
+            allowedVideoRegex: options.allowedVideoRegex
+        )
+    }
 
     init(unlikelyCandidatesPattern: String = unlikelyCandidatesDefaultPattern,
          okMaybeItsACandidatePattern: String = okMaybeItsACandidateDefaultPattern,
          positivePattern: String = positiveDefaultPattern,
          negativePattern: String = negativeDefaultPattern,
-         extraneousPattern: String = extraneousDefaultPattern,
          bylinePattern: String = bylineDefaultPattern,
-         replaceFontsPattern: String = replaceFontsDefaultPattern,
          normalizePattern: String = normalizeDefaultPattern,
          videosPattern: String = videosDefaultPattern,
          allowedVideoRegex: NSRegularExpression? = nil,
-         nextLinkPattern: String = nextLinkDefaultPattern,
-         prevLinkPattern: String = prevLinkDefaultPattern,
          whitespacePattern: String = whitespaceDefaultPattern,
          hasContentPattern: String = hasContentDefaultPattern) {
         func re(_ pattern: String, options: NSRegularExpression.Options = [.caseInsensitive]) -> NSRegularExpression {
@@ -63,13 +64,9 @@ final class RegExUtil {
         okMaybeItsACandidate = re(okMaybeItsACandidatePattern)
         positive = re(positivePattern)
         negative = re(negativePattern)
-        extraneous = re(extraneousPattern)
         byline = re(bylinePattern)
-        replaceFonts = re(replaceFontsPattern)
         normalize = re(normalizePattern, options: [])
         videos = allowedVideoRegex ?? re(videosPattern)
-        nextLink = re(nextLinkPattern)
-        prevLink = re(prevLinkPattern)
         whitespace = re(whitespacePattern, options: [])
         hasContent = re(hasContentPattern, options: [])
     }

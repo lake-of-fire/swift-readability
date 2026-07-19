@@ -15,17 +15,31 @@ concurrency:
 
 jobs:
   swift:
-    name: Swift 6.2 native suite
+    name: Native, differential, and benchmark gates
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Tests/JavaScript/package-lock.json
       - name: Report toolchain
         run: swift --version
-      - name: Resolve dependencies
-        run: swift package resolve
-      - name: Build and test
-        run: swift test -c release
+      - name: Resolve locked dependencies
+        run: |
+          swift package resolve
+          git diff --exit-code Package.resolved
+          grep -q '"version" : "2.13.6"' Package.resolved
+      - name: Native release tests with warnings as errors
+        run: swift test -c release -Xswiftc -warnings-as-errors
+      - name: Install reference-test dependencies
+        run: npm --prefix Tests/JavaScript ci
+      - name: Compare every native result with pinned Mozilla
+        run: npm --prefix Tests/JavaScript run test:differential
+      - name: Fail-closed benchmark smoke
+        run: swift run -c release SwiftReadabilityBench --iterations 1 --warmup 0 --filter qq --summary-only
 
   javascript-reference:
     name: JavaScript reference parity

@@ -5,9 +5,7 @@ import Testing
 
 struct ParitySupplementaryTests {
     @Test func jsonLDCreatorsRemainAvailableForChromeCleanup() throws {
-        let fixture = try #require(
-            loadFixtures().first(where: { $0.name == "asahi-article-title-byline" })
-        )
+        let fixture = try FixtureRepository.packageResources.load(named: "asahi-article-title-byline")
         let document = try SwiftSoup.parse(fixture.source, fixture.url.absoluteString)
         let metadata = MetadataParser().getArticleMetadata(document, disableJSONLD: false)
 

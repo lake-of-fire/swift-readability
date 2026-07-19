@@ -11,15 +11,14 @@ class ProcessorBase {
         for child in elements.reversed() where child !== element {
             if child.parent() != nil {
                 if filter?(child) ?? true {
-                    printAndRemove(node: child, reason: "removeNode('" + tagName + "')")
+                    printAndRemove(node: child)
                 }
             }
         }
     }
 
-    func printAndRemove(node: Node, reason: String) {
+    func printAndRemove(node: Node) {
         if node.parent() != nil {
-            // debug logging omitted
             try? node.remove()
         }
     }

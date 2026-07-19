@@ -2,7 +2,7 @@
 description = "Run the Swift Readability fixture and API tests"
 run = """
 set -euo pipefail
-swift test -q -Xswiftc -suppress-warnings
+swift test -q
 """
 
 [tasks."test:javascript"]
@@ -18,6 +18,14 @@ fi
 npm --prefix Tests/JavaScript test
 """
 
+[tasks."test:differential"]
+description = "Compare every observable native result with pinned Mozilla Readability"
+depends = ["test:javascript"]
+run = """
+set -euo pipefail
+npm --prefix Tests/JavaScript run test:differential
+"""
+
 [tasks."test:parity"]
-description = "Run Swift and JavaScript Readability against the shared fixture corpus"
-depends = ["test:swift", "test:javascript"]
+description = "Run native, reference, and direct differential Readability gates"
+depends = ["test:swift", "test:differential"]

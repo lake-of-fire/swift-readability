@@ -3,7 +3,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "node --test test/readability-fixtures.test.js"
+    "test": "node --test test/*.test.js",
+    "test:differential": "node differential/readability-differential.js"
   },
   "devDependencies": {
     "js-beautify": "2.0.3",

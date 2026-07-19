@@ -7,12 +7,12 @@ struct ReaderableTests {
         try SwiftSoup.parse(html)
     }
 
-    @Test func readerableFixtures() throws {
-        for fixture in loadFixtures() {
-            guard let expected = fixture.expectedMetadata?.readerable else { continue }
-            let actual = Readability.isProbablyReaderable(html: fixture.source)
-            #expect(actual == expected, "Fixture \(fixture.name) readerable mismatch")
-        }
+    @Test(arguments: fixtureTestCases())
+    func readerableFixture(_ testCase: FixtureTestCase) throws {
+        let fixture = try testCase.requireFixture()
+        guard let expected = fixture.expectedMetadata?.readerable else { return }
+        let actual = Readability.isProbablyReaderable(html: fixture.source)
+        #expect(actual == expected, "Fixture \(fixture.name) readerable mismatch")
     }
 
     @Test func readerableThresholds() throws {

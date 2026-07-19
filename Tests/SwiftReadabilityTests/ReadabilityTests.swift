@@ -15,12 +15,17 @@ struct ReadabilityTests {
         let readerable: Bool?
     }
 
-    @Test(arguments: loadFixtures())
-    func parsesFixture(_ fixture: Fixture) throws {
+    @Test(arguments: fixtureTestCases())
+    func parsesFixture(_ testCase: FixtureTestCase) throws {
+        let fixture = try testCase.requireFixture()
         let readability = Readability(
             html: fixture.source,
             url: fixture.url,
-            options: ReadabilityOptions(classesToPreserve: ["caption"], useXMLSerializer: true)
+            options: ReadabilityOptions(
+                classesToPreserve: ["caption"],
+                useXMLSerializer: true,
+                extensions: fixture.extensionProfile?.readabilityExtensions ?? []
+            )
         )
         guard let result = try readability.parse() else {
             #expect(Bool(false), "Expected readability to return a result for \(fixture.name)")
@@ -83,144 +88,6 @@ struct ReadabilityTests {
     }
 }
 
-// MARK: - Fixture loading
-
-struct FixtureSuiteManifest: Decodable {
-    struct DefaultFixtureSelection: Decodable {
-        let swift: [String]?
-        let javascript: [String]?
-    }
-
-    struct KnownFailure: Decodable {
-        let name: String
-        let runners: [String]
-        let reason: String?
-    }
-
-    struct FixtureAssertions: Decodable, Sendable {
-        let textExcludes: [String]?
-        let contentExcludes: [String]?
-        let contentIncludes: [String]?
-    }
-
-    let baseURL: URL?
-    let defaultFixtureSelection: DefaultFixtureSelection?
-    let assertions: [String: FixtureAssertions]?
-    let knownFailures: [KnownFailure]
-
-    static let fallbackBaseURL = URL(string: "http://fakehost/test/page.html")!
-
-    static func load(relativeTo sourceFile: StaticString = #filePath) -> FixtureSuiteManifest {
-        let fileURL = URL(fileURLWithPath: "\(sourceFile)")
-        let manifestURL = fileURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/readability-suite.json")
-
-        guard let data = try? Data(contentsOf: manifestURL),
-              let manifest = try? JSONDecoder().decode(FixtureSuiteManifest.self, from: data) else {
-            return FixtureSuiteManifest(
-                baseURL: fallbackBaseURL,
-                defaultFixtureSelection: nil,
-                assertions: nil,
-                knownFailures: []
-            )
-        }
-        return manifest
-    }
-
-    func knownFailureNames(for runner: String) -> Set<String> {
-        Set(knownFailures.compactMap { failure in
-            guard failure.runners.contains(runner) || failure.runners.contains("*") else { return nil }
-            return failure.name
-        })
-    }
-}
-
-struct Fixture: Sendable, CustomStringConvertible {
-    let name: String
-    let url: URL
-    let source: String
-    let expectedHTML: String?
-    let expectedMetadata: ReadabilityTests.ExpectedMetadata?
-    let assertions: FixtureSuiteManifest.FixtureAssertions?
-
-    var description: String { "Fixture(\(name))" }
-}
-
-func loadFixtures() -> [Fixture] {
-    let environment = ProcessInfo.processInfo.environment
-    let manifest = FixtureSuiteManifest.load()
-    let selectedFixtures: Set<String>? = environment["SWIFT_READABILITY_FIXTURES"]
-        .map { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
-        .map { Set($0.filter { !$0.isEmpty }) }
-    let fixtureRegex: NSRegularExpression? = environment["SWIFT_READABILITY_FIXTURE_REGEX"].flatMap {
-        try? NSRegularExpression(pattern: $0, options: [])
-    }
-
-    // Resolve fixtures relative to this source file to avoid SwiftPM resource name collisions.
-    let thisFile = URL(fileURLWithPath: #filePath)
-    let baseURL = thisFile
-        .deletingLastPathComponent() // Tests/SwiftReadabilityTests
-        .appendingPathComponent("Fixtures/test-pages")
-
-    let fileManager = FileManager.default
-    guard let enumerator = fileManager.enumerator(
-        at: baseURL,
-        includingPropertiesForKeys: [.isDirectoryKey],
-        options: [.skipsHiddenFiles]
-    ) else {
-        return []
-    }
-
-    let basePageURL = manifest.baseURL ?? FixtureSuiteManifest.fallbackBaseURL
-    var fixtures: [Fixture] = []
-    for case let folderURL as URL in enumerator {
-        let values = try? folderURL.resourceValues(forKeys: [.isDirectoryKey])
-        guard values?.isDirectory == true else { continue }
-
-        let sourceURL = folderURL.appendingPathComponent("source.html")
-        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else { continue }
-
-        let expectedHTMLURL = folderURL.appendingPathComponent("expected.html")
-        let expectedHTML = try? String(contentsOf: expectedHTMLURL, encoding: .utf8)
-
-        let expectedMetadataURL = folderURL.appendingPathComponent("expected-metadata.json")
-        let expectedMetadata: ReadabilityTests.ExpectedMetadata?
-        if let data = try? Data(contentsOf: expectedMetadataURL) {
-            expectedMetadata = try? JSONDecoder().decode(ReadabilityTests.ExpectedMetadata.self, from: data)
-        } else {
-            expectedMetadata = nil
-        }
-
-        fixtures.append(Fixture(
-            name: folderURL.lastPathComponent,
-            url: basePageURL,
-            source: source.trimmingCharacters(in: .whitespacesAndNewlines),
-            expectedHTML: expectedHTML?.trimmingCharacters(in: .whitespacesAndNewlines),
-            expectedMetadata: expectedMetadata,
-            assertions: manifest.assertions?[folderURL.lastPathComponent]
-        ))
-    }
-
-    fixtures.sort { $0.name < $1.name }
-    if let selectedFixtures, !selectedFixtures.isEmpty {
-        fixtures = fixtures.filter { selectedFixtures.contains($0.name) }
-    }
-    if let fixtureRegex {
-        fixtures = fixtures.filter {
-            let range = NSRange(location: 0, length: $0.name.utf16.count)
-            return fixtureRegex.firstMatch(in: $0.name, options: [], range: range) != nil
-        }
-    }
-    if environment["SWIFT_READABILITY_INCLUDE_KNOWN_FAILURES"] != "1" {
-        let knownFailures = manifest.knownFailureNames(for: "swift")
-        if !knownFailures.isEmpty {
-            fixtures = fixtures.filter { !knownFailures.contains($0.name) }
-        }
-    }
-    return fixtures
-}
-
 // MARK: - Debugging helpers
 
 struct DOMComparison: Sendable, CustomStringConvertible {
@@ -272,8 +139,8 @@ enum DOMComparator {
             }
 
             if let aText = a as? TextNode, let eText = e as? TextNode {
-                let actualText = htmlTransform(aText.getWholeText())
-                let expectedText = htmlTransform(eText.getWholeText())
+                let actualText = comparableText(aText)
+                let expectedText = comparableText(eText)
                 if actualText != expectedText {
                     return DOMComparison(
                         isEqual: false,
@@ -298,14 +165,14 @@ enum DOMComparator {
         return DOMComparison(isEqual: true, mismatchDescription: nil)
     }
 
-    private static func filteredAttributes(for element: Element) -> [String: String] {
-        var attrs: [String: String] = [:]
+    private static func filteredAttributes(for element: Element) -> [String] {
+        var attrs: [String] = []
         if let attributes = element.getAttributes() {
             for attribute in attributes {
                 let key = attribute.getKey()
                 guard isValidXMLName(key) else { continue }
                 let value = attribute.getValue()
-                attrs[key] = normalizedAttributeValue(key: key, value: value)
+                attrs.append("\(key)=\(normalizedAttributeValue(key: key, value: value))")
             }
         }
         return attrs
@@ -319,16 +186,46 @@ enum DOMComparator {
     }
 
     private static func isValidXMLName(_ name: String) -> Bool {
-        // Approximation sufficient for Mozilla test fixtures.
-        // Allows optional namespace prefix (e.g. "xml:lang").
-        let pattern = #"^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?$"#
-        return name.range(of: pattern, options: .regularExpression) != nil
+        // XML 1.0 (Fifth Edition) NameStartChar/NameChar. This mirrors the
+        // JavaScript oracle's xml-name-validator instead of silently dropping
+        // valid non-ASCII attribute names from golden comparisons.
+        let scalars = name.unicodeScalars
+        guard let first = scalars.first, isXMLNameStart(first.value) else { return false }
+        return scalars.dropFirst().allSatisfy { isXMLNameCharacter($0.value) }
+    }
+
+    private static func isXMLNameStart(_ scalar: UInt32) -> Bool {
+        scalar == 0x3A || scalar == 0x5F
+            || (0x41...0x5A).contains(scalar)
+            || (0x61...0x7A).contains(scalar)
+            || (0xC0...0xD6).contains(scalar)
+            || (0xD8...0xF6).contains(scalar)
+            || (0xF8...0x2FF).contains(scalar)
+            || (0x370...0x37D).contains(scalar)
+            || (0x37F...0x1FFF).contains(scalar)
+            || (0x200C...0x200D).contains(scalar)
+            || (0x2070...0x218F).contains(scalar)
+            || (0x2C00...0x2FEF).contains(scalar)
+            || (0x3001...0xD7FF).contains(scalar)
+            || (0xF900...0xFDCF).contains(scalar)
+            || (0xFDF0...0xFFFD).contains(scalar)
+            || (0x10000...0xEFFFF).contains(scalar)
+    }
+
+    private static func isXMLNameCharacter(_ scalar: UInt32) -> Bool {
+        isXMLNameStart(scalar)
+            || scalar == 0x2D
+            || scalar == 0x2E
+            || scalar == 0xB7
+            || (0x30...0x39).contains(scalar)
+            || (0x300...0x36F).contains(scalar)
+            || (0x203F...0x2040).contains(scalar)
     }
 
     private static func nodeStr(_ node: Node?) -> String {
         guard let node else { return "(no node)" }
         if let text = node as? TextNode {
-            return "#text(\(htmlTransform(text.getWholeText())))"
+            return "#text(\(comparableText(text)))"
         }
         if let element = node as? Element {
             var result = element.tagName().lowercased()
@@ -342,8 +239,19 @@ enum DOMComparator {
     }
 
     private static func htmlTransform(_ str: String) -> String {
+        // Preserve leading/trailing collapsed spaces: spaces at inline element
+        // boundaries affect rendered text and are significant to the JS oracle.
         str.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func comparableText(_ node: TextNode) -> String {
+        let transformed = htmlTransform(node.getWholeText())
+        guard node.nextSibling() == nil else { return transformed }
+
+        // The JavaScript oracle beautifies both strings before parsing them.
+        // That normalizes indentation immediately before a closing tag, so the
+        // native comparator ignores only that terminal formatting whitespace.
+        return transformed.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression)
     }
 
     private static func inOrderTraverse(from node: Node) -> Node? {
@@ -360,6 +268,10 @@ enum DOMComparator {
     private static func inOrderIgnoreEmptyTextNodes(from node: Node) -> Node? {
         var current = inOrderTraverse(from: node)
         while let cur = current {
+            if cur is SwiftSoup.Comment {
+                current = inOrderTraverse(from: cur)
+                continue
+            }
             if let text = cur as? TextNode {
                 if text.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     current = inOrderTraverse(from: cur)

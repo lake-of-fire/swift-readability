@@ -12,9 +12,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
- * Modified by SwiftReadability contributors to track Mozilla Readability
- * behavior and the additional fixtures documented in this repository.
  */
 
 /*
@@ -26,9 +23,8 @@ var REGEXPS = {
   // NOTE: These two regular expressions are duplicated in
   // Readability.js. Please keep both copies in sync.
   unlikelyCandidates:
-    /-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
-  okMaybeItsACandidate:
-    /and|article|body|column|content|main|mathjax|shadow/i,
+    /-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
+  okMaybeItsACandidate: /and|article|body|column|content|main|mathjax|shadow/i,
 };
 
 function isNodeVisible(node) {
@@ -36,7 +32,7 @@ function isNodeVisible(node) {
   return (
     (!node.style || node.style.display != "none") &&
     !node.hasAttribute("hidden") &&
-    // check for "fallback-image" so that wikimedia math images are displayed
+    //check for "fallback-image" so that wikimedia math images are displayed
     (!node.hasAttribute("aria-hidden") ||
       node.getAttribute("aria-hidden") != "true" ||
       (node.className &&
@@ -49,9 +45,9 @@ function isNodeVisible(node) {
  * Decides whether or not the document is reader-able without parsing the whole thing.
  * @param {Object} options Configuration object.
  * @param {number} [options.minContentLength=140] The minimum node content length used to decide if the document is readerable.
- * @param {number} [options.minScore=20] The minimum cumulated 'score' used to determine if the document is readerable.
+ * @param {number} [options.minScore=20] The minumum cumulated 'score' used to determine if the document is readerable.
  * @param {Function} [options.visibilityChecker=isNodeVisible] The function used to determine if a node is visible.
- * @return {boolean} Whether or not we suspect Readability.parse() will succeed at returning an article object.
+ * @return {boolean} Whether or not we suspect Readability.parse() will suceeed at returning an article object.
  */
 function isProbablyReaderable(doc, options = {}) {
   // For backward compatibility reasons 'options' can either be a configuration object or the function used
