@@ -10,7 +10,6 @@ struct ReaderableTests {
     @Test func readerableFixtures() throws {
         for fixture in loadFixtures() {
             guard let expected = fixture.expectedMetadata?.readerable else { continue }
-            let doc = try SwiftSoup.parse(fixture.source, fixture.url.absoluteString)
             let actual = Readability.isProbablyReaderable(html: fixture.source)
             #expect(actual == expected, "Fixture \(fixture.name) readerable mismatch")
         }

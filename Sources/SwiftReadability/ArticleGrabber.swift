@@ -1708,7 +1708,7 @@ final class ArticleGrabber: ProcessorBase {
         options: [.caseInsensitive]
     )
     private let profileComponentPattern = try! NSRegularExpression(
-        pattern: "(writer|author)\\s*profile",
+        pattern: "^(writer|author)\\s*profile$",
         options: [.caseInsensitive]
     )
     private let relatedSectionHeadingPattern = try! NSRegularExpression(
@@ -1731,7 +1731,7 @@ final class ArticleGrabber: ProcessorBase {
 
         removeNodes(in: articleContent, tagName: "div") { node in
             if self.isCompactNonPrintOrAdNode(node) { return true }
-            if self.isCompactStandaloneBylineChrome(node) { return true }
+            if self.isCreatorBylineChrome(node, creatorNames: metadata.creatorNames) { return true }
             if self.isCompactRelatedSection(node, linkDensityCache: linkDensityCache) { return true }
             return false
         }
@@ -1741,7 +1741,7 @@ final class ArticleGrabber: ProcessorBase {
         }
 
         removeNodes(in: articleContent, tagName: "p") { paragraph in
-            self.isPRLabel(paragraph) || self.isCompactStandaloneBylineParagraph(paragraph)
+            self.isPRLabel(paragraph)
         }
 
         removeCompactComponentContainers(
@@ -1749,7 +1749,7 @@ final class ArticleGrabber: ProcessorBase {
             componentPattern: subscriptionComponentPattern,
             maximumTextLength: 500
         )
-        removeCompactComponentContainers(
+        removeComponentElements(
             in: articleContent,
             componentPattern: profileComponentPattern,
             maximumTextLength: 800
@@ -1759,18 +1759,37 @@ final class ArticleGrabber: ProcessorBase {
     private func removeDuplicateTitleChrome(articleContent: Element, metadata: ArticleMetadata) {
         guard let articleTitle = metadata.title, !articleTitle.isEmpty else { return }
 
-        removeNodes(in: articleContent, tagName: "div") { node in
-            if node === articleContent { return false }
-            guard self.getInnerText(node, regEx: self.regEx).count < 350 else { return false }
-            guard let headings = try? node.select("h1, h2"), !headings.isEmpty else { return false }
-            return headings.contains { self.headerDuplicatesTitle(node: $0, articleTitle: articleTitle) }
-        }
+        let normalizedTitle = articleTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let leadingArticleText = getInnerText(articleContent, regEx: regEx)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let headings = (try? articleContent.select("h1, h2").array()) ?? []
+        for heading in headings {
+            let headingText = getInnerText(heading, regEx: regEx)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let isDuplicate = headerDuplicatesTitle(node: heading, articleTitle: articleTitle) ||
+                (!headingText.isEmpty && normalizedTitle.hasPrefix(headingText))
+            // This is a fallback for title chrome that escaped the normal preparation
+            // pass. Restrict it to the leading visible text so a later section heading
+            // that merely resembles the document title is never removed.
+            guard isDuplicate,
+                  !headingText.isEmpty,
+                  leadingArticleText.hasPrefix(headingText) else { continue }
 
-        removeNodes(in: articleContent, tagName: "h1") { heading in
-            self.headerDuplicatesTitle(node: heading, articleTitle: articleTitle)
-        }
-        removeNodes(in: articleContent, tagName: "h2") { heading in
-            self.headerDuplicatesTitle(node: heading, articleTitle: articleTitle)
+            let wrapper = heading.parent()
+            printAndRemove(node: heading, reason: "header duplicates title")
+
+            guard let wrapper,
+                  wrapper !== articleContent,
+                  wrapper.children().count == 1,
+                  !wrapper.getChildNodes().contains(where: { node in
+                      guard let text = node as? TextNode else { return false }
+                      return regEx.hasContent(text.getWholeText())
+                  }),
+                  let onlyChild = wrapper.children().firstSafe
+            else { continue }
+
+            _ = try? onlyChild.remove()
+            _ = try? wrapper.replaceWith(onlyChild)
         }
     }
 
@@ -1802,23 +1821,28 @@ final class ArticleGrabber: ProcessorBase {
         return getInnerText(node, regEx: regEx).count < 500
     }
 
-    private func isCompactStandaloneBylineChrome(_ node: Element) -> Bool {
+    private func isCreatorBylineChrome(_ node: Element, creatorNames: [String]) -> Bool {
+        guard !creatorNames.isEmpty else { return false }
         let text = getInnerText(node, regEx: regEx)
-        guard !text.isEmpty, text.count <= 100 else { return false }
-        if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
-        if ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) > 0 {
+        guard !text.isEmpty, text.count <= 200 else { return false }
+        let compactText = compactedComparableText(text)
+        let compactCreatorNames = creatorNames
+            .map(compactedComparableText)
+            .filter { !$0.isEmpty }
+        guard !compactCreatorNames.isEmpty,
+              compactCreatorNames.allSatisfy(compactText.contains) else { return false }
+        guard ((try? node.select("h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) == 0 else {
             return false
         }
-        let paragraphCount = (try? node.select("p").count) ?? 0
-        guard paragraphCount <= 2 else { return false }
-        return hasFollowingArticleBody(after: node)
-    }
+        if compactText == compactCreatorNames.joined() {
+            return hasFollowingArticleBody(after: node)
+        }
 
-    private func isCompactStandaloneBylineParagraph(_ paragraph: Element) -> Bool {
-        guard let parent = paragraph.parent() else { return false }
-        let parentText = getInnerText(parent, regEx: regEx)
-        guard parentText == getInnerText(paragraph, regEx: regEx) else { return false }
-        return isCompactStandaloneBylineChrome(parent)
+        // Many publishers group the date, access label, and JSON-LD creators in
+        // one compact metadata row. Matching every declared creator plus a real
+        // <time> element is a semantic signal and avoids guessing from CSS names.
+        let hasPublishedTime = ((try? node.select("time").count) ?? 0) > 0
+        return hasPublishedTime
     }
 
     private func removeLeadingCompactTextChrome(from articleContent: Element, linkDensityCache: LinkDensityCache) {
@@ -1832,20 +1856,9 @@ final class ArticleGrabber: ProcessorBase {
                 printAndRemove(node: firstChild, reason: "leading compact media action chrome")
                 continue
             }
-            if isCompactTextOnlyChrome(firstChild) {
-                printAndRemove(node: firstChild, reason: "leading compact text chrome")
-                continue
-            }
             guard firstChild.children().count > 0 else { break }
             current = firstChild
         }
-    }
-
-    private func isCompactTextOnlyChrome(_ node: Element) -> Bool {
-        let text = getInnerText(node, regEx: regEx)
-        guard !text.isEmpty, text.count <= 100 else { return false }
-        if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
-        return ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) == 0
     }
 
     private func isCompactMediaActionChrome(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
@@ -1929,6 +1942,19 @@ final class ArticleGrabber: ProcessorBase {
             if let candidate, candidate.parent() != nil {
                 printAndRemove(node: candidate, reason: "compact component chrome")
             }
+        }
+    }
+
+    private func removeComponentElements(in articleContent: Element,
+                                         componentPattern: NSRegularExpression,
+                                         maximumTextLength: Int) {
+        let components = elements(in: articleContent).filter { component in
+            let componentName = component.attrOrEmpty("x-component-name")
+            return matches(componentPattern, in: componentName) &&
+                getInnerText(component, regEx: regEx).count <= maximumTextLength
+        }
+        for component in components where component.parent() != nil {
+            printAndRemove(node: component, reason: "component chrome")
         }
     }
 

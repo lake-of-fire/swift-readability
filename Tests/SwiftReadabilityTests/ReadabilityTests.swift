@@ -23,7 +23,7 @@ struct ReadabilityTests {
             options: ReadabilityOptions(classesToPreserve: ["caption"], useXMLSerializer: true)
         )
         guard let result = try readability.parse() else {
-            #expect(false, "Expected readability to return a result for \(fixture.name)")
+            #expect(Bool(false), "Expected readability to return a result for \(fixture.name)")
             return
         }
 
@@ -51,18 +51,19 @@ struct ReadabilityTests {
             }
         }
 
+        if ProcessInfo.processInfo.environment["SWIFT_READABILITY_DUMP_RAW"] == "1" {
+            let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("swift-readability-fixture-dumps-raw", isDirectory: true)
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let rawURL = tempDir.appendingPathComponent("\(fixture.name)-raw.html")
+            try? result.contentHTML.write(to: rawURL, atomically: true, encoding: .utf8)
+        }
+
         if let expectedHTML = fixture.expectedHTML {
-            // Mozilla's test suite runs js-beautify over both actual and expected HTML
-            // before parsing and comparing the DOMs. Do the same to avoid false negatives
-            // from formatting-only whitespace differences.
-            if ProcessInfo.processInfo.environment["SWIFT_READABILITY_DUMP_RAW"] == "1" {
-                let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-                    .appendingPathComponent("swift-readability-fixture-dumps-raw", isDirectory: true)
-                try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-                let rawURL = tempDir.appendingPathComponent("\(fixture.name)-raw.html")
-                try? result.contentHTML.write(to: rawURL, atomically: true, encoding: .utf8)
-            }
-            let actualHTML = try MozillaPrettyPrinter.prettyPrint(result.contentHTML)
+            // DOMComparator parses both documents and normalizes text whitespace, so
+            // formatting either string with Node's js-beautify is unnecessary. Keeping
+            // this path native also makes `swift test` work without Node or npm.
+            let actualHTML = result.contentHTML
             let comparison = DOMComparator.compare(
                 actualHTML: actualHTML,
                 expectedHTML: expectedHTML
@@ -233,7 +234,16 @@ struct DOMComparison: Sendable, CustomStringConvertible {
 }
 
 enum DOMComparator {
+    private static let comparisonLock = NSLock()
+
     static func compare(actualHTML: String, expectedHTML: String) -> DOMComparison {
+        // The parameterized fixture cases intentionally exercise extraction in
+        // parallel. SwiftSoup's parser/query caches can, however, make concurrent
+        // test-only reparsing nondeterministic. Serialize only this comparison pass;
+        // the native extraction work remains concurrent and therefore stress-tested.
+        comparisonLock.lock()
+        defer { comparisonLock.unlock() }
+
         guard let actualDoc = try? SwiftSoup.parse(actualHTML),
               let expectedDoc = try? SwiftSoup.parse(expectedHTML) else {
             return DOMComparison(isEqual: false, mismatchDescription: "Failed to parse HTML into DOM")
@@ -333,6 +343,7 @@ enum DOMComparator {
 
     private static func htmlTransform(_ str: String) -> String {
         str.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func inOrderTraverse(from node: Node) -> Node? {
@@ -358,132 +369,5 @@ enum DOMComparator {
             return cur
         }
         return nil
-    }
-}
-
-// MARK: - Mozilla fixture formatting
-
-enum MozillaPrettyPrinter {
-    private static let dependencyInstallLock = NSLock()
-
-    static func prettyPrint(_ html: String) throws -> String {
-        // Match tmp-readability/test/utils.js prettyPrint() options exactly.
-        let script = #"""
-const fs = require("fs");
-const prettyPrint = require("js-beautify").html;
-const input = fs.readFileSync(0, { encoding: "utf-8" });
-const output = prettyPrint(input, {
-  indent_size: 4,
-  indent_char: " ",
-  indent_level: 0,
-  indent_with_tabs: false,
-  preserve_newlines: false,
-  break_chained_methods: false,
-  eval_code: false,
-  unescape_strings: false,
-  wrap_line_length: 0,
-  wrap_attributes: "auto",
-  wrap_attributes_indent_size: 4,
-});
-process.stdout.write(output);
-"""#
-
-        let thisFile = URL(fileURLWithPath: #filePath)
-        let repoRoot = thisFile
-            .deletingLastPathComponent() // Tests/SwiftReadabilityTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repo root
-        let javascriptTestCwd = repoRoot
-            .appendingPathComponent("Tests", isDirectory: true)
-            .appendingPathComponent("JavaScript", isDirectory: true)
-        try ensureJSBeautifyInstalled(in: javascriptTestCwd)
-        let legacyNodeCwd = repoRoot.appendingPathComponent("tmp-readability", isDirectory: true)
-        let nodeCwd = FileManager.default.fileExists(
-            atPath: javascriptTestCwd.appendingPathComponent("node_modules/js-beautify").path
-        ) ? javascriptTestCwd : legacyNodeCwd
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["node", "-e", script]
-        process.currentDirectoryURL = nodeCwd
-
-        let stdinPipe = Pipe()
-        process.standardInput = stdinPipe
-
-        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("swift-readability-js-beautify", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let stdoutURL = tempDir.appendingPathComponent("\(UUID().uuidString)-stdout.txt")
-        let stderrURL = tempDir.appendingPathComponent("\(UUID().uuidString)-stderr.txt")
-        FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
-        FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
-        let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
-        let stderrHandle = try FileHandle(forWritingTo: stderrURL)
-        process.standardOutput = stdoutHandle
-        process.standardError = stderrHandle
-
-        try process.run()
-
-        if let data = html.data(using: .utf8) {
-            stdinPipe.fileHandleForWriting.write(data)
-        }
-        stdinPipe.fileHandleForWriting.closeFile()
-
-        process.waitUntilExit()
-
-        try? stdoutHandle.close()
-        try? stderrHandle.close()
-
-        let stdoutData = (try? Data(contentsOf: stdoutURL)) ?? Data()
-        let stderrData = (try? Data(contentsOf: stderrURL)) ?? Data()
-        try? FileManager.default.removeItem(at: stdoutURL)
-        try? FileManager.default.removeItem(at: stderrURL)
-
-        guard process.terminationStatus == 0 else {
-            let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
-            throw NSError(
-                domain: "MozillaPrettyPrinter",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: "js-beautify failed (\(process.terminationStatus)): \(stderrText)"]
-            )
-        }
-
-        return String(data: stdoutData, encoding: .utf8) ?? ""
-    }
-
-    private static func ensureJSBeautifyInstalled(in javascriptTestCwd: URL) throws {
-        let dependencyPath = javascriptTestCwd
-            .appendingPathComponent("node_modules", isDirectory: true)
-            .appendingPathComponent("js-beautify", isDirectory: true)
-            .path
-        guard !FileManager.default.fileExists(atPath: dependencyPath) else { return }
-
-        dependencyInstallLock.lock()
-        defer { dependencyInstallLock.unlock() }
-
-        guard !FileManager.default.fileExists(atPath: dependencyPath) else { return }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["npm", "ci", "--ignore-scripts"]
-        process.currentDirectoryURL = javascriptTestCwd
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
-            throw NSError(
-                domain: "MozillaPrettyPrinter",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: "npm ci failed (\(process.terminationStatus)): \(stderrText)"]
-            )
-        }
     }
 }

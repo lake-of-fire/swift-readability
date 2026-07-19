@@ -54,6 +54,7 @@ struct ArticleGrabberOptions {
 final class ArticleMetadata {
     var title: String?
     var byline: String?
+    var creatorNames: [String] = []
     var excerpt: String?
     var dir: String?
     var charset: String?

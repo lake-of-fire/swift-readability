@@ -91,6 +91,7 @@ final class MetadataParser: ProcessorBase {
         } else if let value = articleAuthor, !value.isEmpty {
             metadata.byline = value
         }
+        metadata.creatorNames = jsonld.creatorNames
 
         // excerpt/description
         if let value = jsonld.excerpt, !value.isEmpty {
@@ -189,6 +190,7 @@ final class MetadataParser: ProcessorBase {
     private struct JSONLDMetadata {
         var title: String?
         var byline: String?
+        var creatorNames: [String] = []
         var excerpt: String?
         var siteName: String?
         var datePublished: String?
@@ -283,6 +285,26 @@ final class MetadataParser: ProcessorBase {
                         meta.byline = names.joined(separator: ", ")
                     }
                 }
+            }
+
+            if let creator = candidate["creator"] {
+                if let name = creator as? String {
+                    meta.creatorNames = [name]
+                } else if let creatorDictionary = creator as? [String: Any],
+                          let name = creatorDictionary["name"] as? String {
+                    meta.creatorNames = [name]
+                } else if let creatorArray = creator as? [Any] {
+                    meta.creatorNames = creatorArray.compactMap { value in
+                        if let name = value as? String { return name }
+                        return (value as? [String: Any])?["name"] as? String
+                    }
+                }
+                meta.creatorNames = meta.creatorNames
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .reduce(into: []) { names, name in
+                        if !names.contains(name) { names.append(name) }
+                    }
             }
 
             if let description = candidate["description"] as? String {

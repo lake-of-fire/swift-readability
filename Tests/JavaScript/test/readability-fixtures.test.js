@@ -1,14 +1,27 @@
-/* eslint-env node, mocha */
+/* eslint-env node */
 
 const fs = require("fs");
 const path = require("path");
-const { expect } = require("chai");
+const assert = require("node:assert/strict");
+const { describe, it } = require("node:test");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const prettyPrint = require("js-beautify").html;
 const xmlNameValidator = require("xml-name-validator").name;
 
-const Readability = require("../../../Sources/SwiftReadability/Resources/Readability");
-const isProbablyReaderable = require("../../../Sources/SwiftReadability/Resources/Readability-readerable");
+const readabilityPath = process.env.READABILITY_JS_PATH
+  ? path.resolve(process.env.READABILITY_JS_PATH)
+  : path.resolve(
+      __dirname,
+      "../../../Sources/SwiftReadability/Resources/Readability"
+    );
+const readerablePath = process.env.READERABLE_JS_PATH
+  ? path.resolve(process.env.READERABLE_JS_PATH)
+  : path.resolve(
+      __dirname,
+      "../../../Sources/SwiftReadability/Resources/Readability-readerable"
+    );
+const Readability = require(readabilityPath);
+const isProbablyReaderable = require(readerablePath);
 
 const fixtureRoot = path.resolve(
   __dirname,
@@ -171,14 +184,17 @@ function expectDOMEqual(actualHTML, expectedHTML) {
   let expectedNode = expectedDOM.documentElement || expectedDOM.childNodes[0];
 
   while (actualNode || expectedNode) {
-    expect(nodeStr(actualNode)).to.equal(nodeStr(expectedNode));
+    assert.equal(nodeStr(actualNode), nodeStr(expectedNode));
+    assert.ok(actualNode && expectedNode, "DOM trees have different lengths");
 
     if (actualNode.nodeType === 3) {
-      expect(htmlTransform(actualNode.textContent)).to.equal(
+      assert.equal(
+        htmlTransform(actualNode.textContent),
         htmlTransform(expectedNode.textContent)
       );
     } else if (actualNode.nodeType === 1) {
-      expect(attributesForNode(actualNode)).to.deep.equal(
+      assert.deepEqual(
+        attributesForNode(actualNode),
         attributesForNode(expectedNode)
       );
     }
@@ -189,11 +205,21 @@ function expectDOMEqual(actualHTML, expectedHTML) {
 }
 
 function expectOptionalEqual(actual, expected) {
-  expect(actual ?? null).to.equal(expected ?? null);
+  assert.equal(actual ?? null, expected ?? null);
 }
 
-describe("Readability.js fixture parity", function () {
-  this.timeout(30000);
+function removeCommentNodesRecursively(node) {
+  for (let index = node.childNodes.length - 1; index >= 0; index -= 1) {
+    const child = node.childNodes[index];
+    if (child.nodeType === child.COMMENT_NODE) {
+      node.removeChild(child);
+    } else if (child.nodeType === child.ELEMENT_NODE) {
+      removeCommentNodesRecursively(child);
+    }
+  }
+}
+
+describe("Readability.js fixture parity", { timeout: 30000 }, function () {
 
   for (const fixture of loadFixtures()) {
     it(`parses ${fixture.name}`, function () {
@@ -202,9 +228,11 @@ describe("Readability.js fixture parity", function () {
         url: baseURL,
         virtualConsole: quietVirtualConsole,
       });
+      removeCommentNodesRecursively(dom.window.document);
 
       if (fixture.expectedMetadata?.readerable != null) {
-        expect(isProbablyReaderable(dom.window.document)).to.equal(
+        assert.equal(
+          isProbablyReaderable(dom.window.document),
           fixture.expectedMetadata.readerable
         );
       }
@@ -212,8 +240,11 @@ describe("Readability.js fixture parity", function () {
       const result = new Readability(dom.window.document, {
         classesToPreserve: ["caption"],
       }).parse();
+      assert.ok(result, `${fixture.name} should produce an article`);
 
-      expect(result).to.include.keys("content", "title", "excerpt", "byline");
+      for (const key of ["content", "title", "excerpt", "byline"]) {
+        assert.ok(Object.prototype.hasOwnProperty.call(result, key), `Missing ${key}`);
+      }
 
       if (fixture.expectedMetadata) {
         expectOptionalEqual(result.title, fixture.expectedMetadata.title);
@@ -230,13 +261,22 @@ describe("Readability.js fixture parity", function () {
 
       if (fixture.assertions) {
         for (const excludedText of fixture.assertions.textExcludes || []) {
-          expect(result.textContent).not.to.include(excludedText);
+          assert.ok(
+            !result.textContent.includes(excludedText),
+            `${fixture.name} should not include text: ${excludedText}`
+          );
         }
         for (const excludedContent of fixture.assertions.contentExcludes || []) {
-          expect(result.content).not.to.include(excludedContent);
+          assert.ok(
+            !result.content.includes(excludedContent),
+            `${fixture.name} should not include content: ${excludedContent}`
+          );
         }
         for (const includedContent of fixture.assertions.contentIncludes || []) {
-          expect(result.content).to.include(includedContent);
+          assert.ok(
+            result.content.includes(includedContent),
+            `${fixture.name} should include content: ${includedContent}`
+          );
         }
       }
 

@@ -12,6 +12,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified by SwiftReadability contributors to track Mozilla Readability
+ * behavior and the additional fixtures documented in this repository.
  */
 
 /*
@@ -139,7 +142,8 @@ Readability.prototype = {
     // Readability-readerable.js. Please keep both copies in sync.
     unlikelyCandidates:
       /-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
-    okMaybeItsACandidate: /and|article|body|column|content|main|shadow/i,
+    okMaybeItsACandidate:
+      /and|article|body|column|content|main|mathjax|shadow/i,
 
     positive:
       /article|body|content|entry|hentry|h-entry|main|page|pagination|post|text|blog|story/i,
@@ -151,7 +155,7 @@ Readability.prototype = {
     replaceFonts: /<(\/?)font[^>]*>/gi,
     normalize: /\s{2,}/g,
     videos:
-      /\/\/(www\.)?((dailymotion|youtube|youtube-nocookie|player\.vimeo|v\.qq)\.com|(archive|upload\.wikimedia)\.org|player\.twitch\.tv)/i,
+      /\/\/(www\.)?((dailymotion|youtube|youtube-nocookie|player\.vimeo|v\.qq|bilibili|live.bilibili)\.com|(archive|upload\.wikimedia)\.org|player\.twitch\.tv)/i,
     shareElements: /(\b|_)(share|sharedaddy)(\b|_)/i,
     nextLink: /(next|weiter|continue|>([^\|]|$)|»([^\|]|$))/i,
     prevLink: /(prev|earl|old|new|<|«)/i,
@@ -595,13 +599,20 @@ Readability.prototype = {
     }
 
     // If there's a separator in the title, first remove the final part
-    if (/ [\|\-\\\/>»] /.test(curTitle)) {
-      titleHadHierarchicalSeparators = / [\\\/>»] /.test(curTitle);
-      curTitle = origTitle.replace(/(.*)[\|\-\\\/>»] .*/gi, "$1");
+    const titleSeparators = /\|\-–—\\\/>»/.source;
+    if (new RegExp(`\\s[${titleSeparators}]\\s`).test(curTitle)) {
+      titleHadHierarchicalSeparators = /\s[\\\/>»]\s/.test(curTitle);
+      let allSeparators = Array.from(
+        origTitle.matchAll(new RegExp(`\\s[${titleSeparators}]\\s`, "gi"))
+      );
+      curTitle = origTitle.substring(0, allSeparators.pop().index);
 
       // If the resulting title is too short, remove the first part instead:
       if (wordCount(curTitle) < 3) {
-        curTitle = origTitle.replace(/[^\|\-\\\/>»]*[\|\-\\\/>»](.*)/gi, "$1");
+        curTitle = origTitle.replace(
+          new RegExp(`^[^${titleSeparators}]*[${titleSeparators}]`, "gi"),
+          ""
+        );
       }
     } else if (curTitle.includes(": ")) {
       // Check if we have an heading containing this exact string, so we
@@ -643,7 +654,10 @@ Readability.prototype = {
       curTitleWordCount <= 4 &&
       (!titleHadHierarchicalSeparators ||
         curTitleWordCount !=
-          wordCount(origTitle.replace(/[\|\-\\\/>»]+/g, "")) - 1)
+          wordCount(
+            origTitle.replace(new RegExp(`\\s[${titleSeparators}]\\s`, "g"), "")
+          ) -
+            1)
     ) {
       curTitle = origTitle;
     }
@@ -1167,23 +1181,39 @@ Readability.prototype = {
         // Turn all divs that don't have children block level elements into p's
         if (node.tagName === "DIV") {
           // Put phrasing content into paragraphs.
-          var p = null;
           var childNode = node.firstChild;
           while (childNode) {
             var nextSibling = childNode.nextSibling;
             if (this._isPhrasingContent(childNode)) {
-              if (p !== null) {
-                p.appendChild(childNode);
-              } else if (!this._isWhitespace(childNode)) {
-                p = doc.createElement("p");
-                node.replaceChild(p, childNode);
-                p.appendChild(childNode);
+              var fragment = doc.createDocumentFragment();
+              // Collect all consecutive phrasing content into a fragment.
+              do {
+                nextSibling = childNode.nextSibling;
+                fragment.appendChild(childNode);
+                childNode = nextSibling;
+              } while (childNode && this._isPhrasingContent(childNode));
+
+              // Trim leading and trailing whitespace from the fragment.
+              while (
+                fragment.firstChild &&
+                this._isWhitespace(fragment.firstChild)
+              ) {
+                fragment.firstChild.remove();
               }
-            } else if (p !== null) {
-              while (p.lastChild && this._isWhitespace(p.lastChild)) {
-                p.lastChild.remove();
+              while (
+                fragment.lastChild &&
+                this._isWhitespace(fragment.lastChild)
+              ) {
+                fragment.lastChild.remove();
               }
-              p = null;
+
+              // If the fragment contains anything, wrap it in a paragraph and
+              // insert it before the next non-phrasing node.
+              if (fragment.firstChild) {
+                var p = doc.createElement("p");
+                p.appendChild(fragment);
+                node.insertBefore(p, nextSibling);
+              }
             }
             childNode = nextSibling;
           }

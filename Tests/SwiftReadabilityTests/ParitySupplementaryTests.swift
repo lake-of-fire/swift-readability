@@ -4,6 +4,17 @@ import Testing
 @testable import SwiftReadability
 
 struct ParitySupplementaryTests {
+    @Test func jsonLDCreatorsRemainAvailableForChromeCleanup() throws {
+        let fixture = try #require(
+            loadFixtures().first(where: { $0.name == "asahi-article-title-byline" })
+        )
+        let document = try SwiftSoup.parse(fixture.source, fixture.url.absoluteString)
+        let metadata = MetadataParser().getArticleMetadata(document, disableJSONLD: false)
+
+        #expect(metadata.byline == "朝日新聞")
+        #expect(metadata.creatorNames == ["中嶋周平", "奥田薫子"])
+    }
+
     private let baseURL = URL(string: "http://example.com")!
 
     @Test func documentPipelineMutatesOriginalDOM() throws {
@@ -32,7 +43,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0, useXMLSerializer: true)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("<img"))
@@ -55,7 +66,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("itemscope"))
@@ -78,7 +89,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0, useXMLSerializer: true)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("itemscope"))
@@ -133,7 +144,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0, classesToPreserve: ["keepme"])
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("keepme"))
@@ -156,7 +167,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0, classesToPreserve: ["keepme"], keepClasses: true)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("keepme"))
@@ -179,7 +190,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0, useXMLSerializer: true)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("itemscope"))
@@ -192,7 +203,7 @@ struct ParitySupplementaryTests {
         let reader = Readability(document: doc, options: ReadabilityOptions(maxElemsToParse: 1))
         do {
             _ = try reader.parse()
-            #expect(false, "Expected parse() to throw when exceeding maxElemsToParse")
+            #expect(Bool(false), "Expected parse() to throw when exceeding maxElemsToParse")
         } catch {
             #expect(error.localizedDescription.contains("Aborting parsing document;"))
         }
@@ -218,7 +229,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("https://example.com/base/page.html"))
@@ -244,7 +255,7 @@ struct ParitySupplementaryTests {
             options: ReadabilityOptions(charThreshold: 0)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("https://example.com/base/img.png"))

@@ -48,7 +48,7 @@ struct ReadabilityAPITests {
 
         do {
             _ = try reader.parse()
-            #expect(false, "Expected parse() to throw when exceeding maxElemsToParse")
+            #expect(Bool(false), "Expected parse() to throw when exceeding maxElemsToParse")
         } catch {
             #expect(error.localizedDescription == "Aborting parsing document; \(numTags) elements found")
         }
@@ -59,7 +59,7 @@ struct ReadabilityAPITests {
 
         let defaultReader = Readability(html: html, url: baseURL, options: ReadabilityOptions(charThreshold: 0))
         guard let defaultResult = try defaultReader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         let defaultDoc = try SwiftSoup.parseBodyFragment(defaultResult.content)
@@ -72,7 +72,7 @@ struct ReadabilityAPITests {
             options: ReadabilityOptions(charThreshold: 0, keepClasses: true)
         )
         guard let keepResult = try keepReader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         let keepDoc = try SwiftSoup.parseBodyFragment(keepResult.content)
@@ -86,7 +86,7 @@ struct ReadabilityAPITests {
         "<div xmlns=\"http://www.w3.org/1999/xhtml\" id=\"readability-page-1\" class=\"page\">My cat: <img src=\"\" /></div>"
 
         let serializer: ReadabilityOptions.Serializer = { element in
-            guard let page = try? element.child(0) else { return "" }
+            let page = element.child(0)
             let inner = (try? page.html()) ?? ""
             let normalizedInner = inner
                 .replacingOccurrences(of: "\n", with: " ")
@@ -104,7 +104,7 @@ struct ReadabilityAPITests {
             options: ReadabilityOptions(charThreshold: 0, serializer: serializer)
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content == expectedXHTML)
@@ -124,7 +124,7 @@ struct ReadabilityAPITests {
             )
         )
         guard let result = try reader.parse() else {
-            #expect(false, "Expected parse() to return a result")
+            #expect(Bool(false), "Expected parse() to return a result")
             return
         }
         #expect(result.content.contains("iframe"))

@@ -31,7 +31,7 @@ public struct ReadabilitySerializedResult<Content> {
     public let readerable: Bool
 }
 
-/// Public façade mirroring Mozilla Readability, backed by the Swift port of readability4j (Jsoup-based).
+/// Pure Swift façade aligned with Mozilla Readability, using SwiftSoup for DOM processing.
 public final class Readability {
     private static let unlikelyCandidatesRegex = try! NSRegularExpression(
         pattern: "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote",

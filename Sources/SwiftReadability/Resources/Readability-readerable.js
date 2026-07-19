@@ -12,6 +12,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified by SwiftReadability contributors to track Mozilla Readability
+ * behavior and the additional fixtures documented in this repository.
  */
 
 /*
@@ -24,7 +27,8 @@ var REGEXPS = {
   // Readability.js. Please keep both copies in sync.
   unlikelyCandidates:
     /-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
-  okMaybeItsACandidate: /and|article|body|column|content|main|shadow/i,
+  okMaybeItsACandidate:
+    /and|article|body|column|content|main|mathjax|shadow/i,
 };
 
 function isNodeVisible(node) {
