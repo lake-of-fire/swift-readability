@@ -7,11 +7,23 @@ struct ReadabilityExtensionsTests {
     @Test("Mozilla mode is the default")
     func defaultOptionsContainNoExtensions() {
         #expect(ReadabilityOptions().extensions.isEmpty)
-        #expect(ReadabilityExtensions.publisherAdaptations.contains(.imageCarouselRecovery))
-        #expect(ReadabilityExtensions.publisherAdaptations.contains(.publisherChromeCleanup))
-        #expect(ReadabilityExtensions.publisherAdaptations.contains(.articleBodyPreservation))
-        #expect(ReadabilityExtensions.publisherAdaptations.contains(.significantMediaPreservation))
-        #expect(ReadabilityExtensions.publisherAdaptations.contains(.rubyNormalization))
+    }
+
+    @Test("Named extensions compose without a client-specific preset")
+    func extensionsComposeIndependently() {
+        let extensions: ReadabilityExtensions = [
+            .imageCarouselRecovery,
+            .publisherChromeCleanup,
+            .articleBodyPreservation,
+            .significantMediaPreservation,
+            .rubyNormalization,
+        ]
+
+        #expect(extensions.contains(.imageCarouselRecovery))
+        #expect(extensions.contains(.publisherChromeCleanup))
+        #expect(extensions.contains(.articleBodyPreservation))
+        #expect(extensions.contains(.significantMediaPreservation))
+        #expect(extensions.contains(.rubyNormalization))
     }
 
     @Test("Publisher patterns cannot alter Mozilla mode implicitly")

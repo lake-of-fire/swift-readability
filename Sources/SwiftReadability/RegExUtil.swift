@@ -7,7 +7,7 @@ import Foundation
 final class RegExUtil {
     static let unlikelyCandidatesDefaultPattern = "-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote"
 
-    static let unlikelyCandidatesConsumerApplicationPattern = "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote"
+    static let unlikelyCandidatesPublisherCleanupPattern = "-ad-|ai2html|admod|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|notprint|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote"
 
     static let okMaybeItsACandidateDefaultPattern = "and|article|body|column|content|main|mathjax|shadow"
 
@@ -15,7 +15,7 @@ final class RegExUtil {
 
     static let negativeDefaultPattern = "-ad-|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget"
 
-    static let negativeConsumerApplicationPattern = "-ad-|admod|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|notprint|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget"
+    static let negativePublisherCleanupPattern = "-ad-|admod|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|notprint|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget"
 
     static let bylineDefaultPattern = "byline|author|dateline|writtenby|p-author"
 
@@ -45,10 +45,10 @@ final class RegExUtil {
         let publisherCleanup = options.extensions.contains(.publisherChromeCleanup)
         self.init(
             unlikelyCandidatesPattern: publisherCleanup
-                ? Self.unlikelyCandidatesConsumerApplicationPattern
+                ? Self.unlikelyCandidatesPublisherCleanupPattern
                 : Self.unlikelyCandidatesDefaultPattern,
             negativePattern: publisherCleanup
-                ? Self.negativeConsumerApplicationPattern
+                ? Self.negativePublisherCleanupPattern
                 : Self.negativeDefaultPattern,
             allowedVideoRegex: options.allowedVideoRegex
         )

@@ -30,15 +30,6 @@ public struct ReadabilityExtensions: OptionSet, Sendable {
     public static let significantMediaPreservation = Self(rawValue: 1 << 3)
     /// Normalizes ruby fallback markup for clients that narrate visible base text separately.
     public static let rubyNormalization = Self(rawValue: 1 << 4)
-
-    /// The extension profile validated by consumer application's publisher-specific fixtures.
-    public static let publisherAdaptations: Self = [
-        .imageCarouselRecovery,
-        .publisherChromeCleanup,
-        .articleBodyPreservation,
-        .significantMediaPreservation,
-        .rubyNormalization,
-    ]
 }
 
 /// Configuration for the Mozilla-compatible extraction pipeline.

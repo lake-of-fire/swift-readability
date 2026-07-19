@@ -7,7 +7,13 @@ struct FixtureSuiteManifest: Decodable, Sendable {
 
         var readabilityExtensions: ReadabilityExtensions {
             switch self {
-            case .publisherAdaptations: .publisherAdaptations
+            case .publisherAdaptations: [
+                .imageCarouselRecovery,
+                .publisherChromeCleanup,
+                .articleBodyPreservation,
+                .significantMediaPreservation,
+                .rubyNormalization,
+            ]
             }
         }
     }

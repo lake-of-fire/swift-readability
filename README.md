@@ -15,7 +15,7 @@ SwiftReadability is a standalone Swift Package Manager library for macOS, iOS, s
 
 The production pipeline is native Swift. SwiftSoup parses HTML and provides DOM operations; WebURL supplies browser-compatible URL parsing and relative-reference resolution; SwiftReadability owns metadata discovery, candidate scoring, cleanup, and result serialization. The `SwiftReadability` target neither contains nor depends on the JavaScript reference target.
 
-Project-specific behavior is an explicit compatibility layer, not a competing Readability implementation. `ReadabilityOptions()` enables no extensions and is the mode compared directly with Mozilla. consumer application opts into its publisher cleanup and media-recovery policy through `ReadabilityExtensions.publisherAdaptations`; individual behaviors remain named flags, with carousel recovery isolated in `ImageCarouselNormalizer`. An extension may be added only with focused positive and false-positive tests while the complete default-mode Mozilla differential remains green.
+Non-Mozilla behavior is an explicit compatibility layer, not a competing Readability implementation. `ReadabilityOptions()` enables no extensions and is the mode compared directly with Mozilla. Clients compose only the granular `ReadabilityExtensions` flags they deliberately need; the package provides no client-specific presets. An extension may be added only with focused positive and false-positive tests while the complete default-mode Mozilla differential remains green.
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Add SwiftReadability with Swift Package Manager:
 ```swift
 .package(
     url: "https://github.com/wolfyy970/swift-readability.git",
-    from: "0.2.0"
+    from: "0.3.0"
 )
 ```
 
@@ -66,19 +66,21 @@ if let article = try reader.parse() {
 }
 ```
 
-Default options provide Mozilla-compatible behavior. A client that deliberately wants consumer application's enhanced publisher handling must opt in:
+Default options provide Mozilla-compatible behavior. Clients may deliberately compose individual non-Mozilla policies when their input requires them:
 
 ```swift
-let publisherAdaptationsReader = Readability(
+let adaptedReader = Readability(
     html: htmlString,
     url: URL(string: "https://example.com/article")!,
-    options: ReadabilityOptions(extensions: .publisherAdaptations)
+    options: ReadabilityOptions(
+        extensions: [.imageCarouselRecovery, .publisherChromeCleanup]
+    )
 )
 
-let article = try publisherAdaptationsReader.parse()
+let article = try adaptedReader.parse()
 ```
 
-The profile combines image-carousel recovery, publisher-chrome cleanup, article-body preservation, significant-media preservation, and ruby normalization. Selective opt-in is also supported, for example `extensions: [.imageCarouselRecovery, .significantMediaPreservation]`.
+Available flags cover image-carousel recovery, publisher-chrome cleanup, article-body preservation, significant-media preservation, and ruby normalization. There is intentionally no aggregate preset: choosing and versioning a policy combination belongs to the consuming application.
 
 Check whether a document is likely to contain a readable article:
 
@@ -101,7 +103,7 @@ Most `ReadabilityOptions` fields correspond directly to Mozilla Readability opti
 Two fields are intentionally Swift-specific and are not represented as Mozilla options:
 
 - `useXMLSerializer` requests SwiftSoup's XML output syntax when the supplied document was parsed as XML. It exists for Swift serialization use cases; it is not part of the JavaScript API and is outside the default HTML differential contract.
-- `extensions` enables explicitly named, non-Mozilla compatibility policies such as consumer application's publisher cleanup and media recovery. Its default is the empty set.
+- `extensions` enables explicitly named, non-Mozilla compatibility policies for publisher cleanup, content recovery, media preservation, and ruby normalization. Its default is the empty set.
 
 `Readability(document:)` operates on the supplied SwiftSoup document directly and destructively normalizes it, matching Mozilla's mutation model. The default serializer emits HTML. Prefer the generic `parse(serializer:)` overload when a caller needs a non-string projection; use XML serialization only for an actual XML input whose consumer requires XML syntax.
 
@@ -111,7 +113,7 @@ The compatibility corpus contains 136 Mozilla-format HTML inputs. In default mod
 
 Mozilla's own JSDOM fixture runner deliberately removes source comments before comparing its frozen `expected.html` files, even though production Readability preserves comments inside selected content. This repository retains those upstream snapshots unchanged as provenance. For the 33 upstream inputs where raw comments change observable output, `expected-raw-input.html` is a generated overlay from the byte-verified Mozilla oracle. Generation first proves the legacy file still matches Mozilla under its historical comment-free input policy, then records the untouched raw-input result. Native and JavaScript fixture comparisons prefer the overlay and compare comment position and data strictly; neither production output nor the direct differential removes or masks comments.
 
-The same corpus also contains five explicitly profiled consumer application regressions for difficult Asahi article chrome, a Hypebeast carousel, a Web Japan feature, and BEPAL content. Their enhanced expected metadata, DOM, and content assertions describe `ReadabilityExtensions.publisherAdaptations`, not Mozilla's output. The differential runner intentionally ignores those enhancement profiles and parses all 136 sources with empty extensions on both sides; this preserves a clean Mozilla baseline while letting the native expected-output suite verify the opt-in client behavior separately.
+The same corpus also contains five explicitly profiled extension regressions for difficult Asahi article chrome, a Hypebeast carousel, a Web Japan feature, and BEPAL content. Their enhanced expected metadata, DOM, and content assertions use the test-only `publisherAdaptations` profile, which composes all granular extensions and is not public API or Mozilla output. The differential runner intentionally ignores enhancement profiles and parses all 136 sources with empty extensions on both sides; this preserves a clean Mozilla baseline while letting the native expected-output suite verify opt-in behavior separately.
 
 The repository was forked from lake-of-fire's Swift implementation and retains its BSD license, attribution, and history. That implementation was an ambitious and useful starting point, informed in turn by Mozilla Readability and Readability4J. The current engineering direction is a reliable Swift implementation governed directly by the pinned Mozilla behavior, built on that lineage while following the pinned Mozilla contract.
 
@@ -133,7 +135,7 @@ Run the native suite, pinned JavaScript oracle checks, and direct Swift-versus-M
 mise run test:parity
 ```
 
-The fixture loaders fail closed: missing or malformed manifests, unknown selections or profiles, invalid regular expressions, missing sources, and zero selected fixtures are test failures rather than silent passes. Source bytes are passed to both implementations without trimming. The native expected-output runner applies `.publisherAdaptations` only to fixtures explicitly named under `extensionProfiles`; JavaScript expectations for those enhanced profiles are deliberately not treated as Mozilla expectations.
+The fixture loaders fail closed: missing or malformed manifests, unknown selections or profiles, invalid regular expressions, missing sources, and zero selected fixtures are test failures rather than silent passes. Source bytes are passed to both implementations without trimming. The native expected-output runner applies the test-only `publisherAdaptations` composition only to fixtures explicitly named under `extensionProfiles`; JavaScript expectations for those enhanced profiles are deliberately not treated as Mozilla expectations.
 
 Run the direct Swift-versus-Mozilla result contract:
 
@@ -201,7 +203,7 @@ Benchmark results supplement correctness evidence; they do not replace parity, d
 
 ## Security
 
-SwiftReadability selects and extracts article content; it does **not** sanitize untrusted HTML. A client that renders `result.content` must apply an appropriate HTML sanitizer and Content Security Policy first, consistent with [Mozilla Readability's security guidance](https://github.com/mozilla/readability#security). consumer application only projects the extracted structure into native narration text and does not render `result.content` as a web page.
+SwiftReadability selects and extracts article content; it does **not** sanitize untrusted HTML. A client that renders `result.content` must apply an appropriate HTML sanitizer and Content Security Policy first, consistent with [Mozilla Readability's security guidance](https://github.com/mozilla/readability#security). The package neither renders nor executes extracted content.
 
 ## License
 

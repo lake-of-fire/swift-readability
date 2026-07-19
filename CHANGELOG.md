@@ -5,6 +5,16 @@ Notable changes to SwiftReadability are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-20
+
+### Changed
+
+- Removed the client-specific aggregate extension preset. Consumers now compose
+  the granular recovery and cleanup flags they need, keeping application policy
+  outside the reusable library.
+- Renamed the internal enhanced-fixture profile and implementation identifiers
+  around their neutral publisher-adaptation responsibilities.
+
 ## [0.2.0] - 2026-07-20
 
 ### Changed
@@ -26,8 +36,9 @@ Notable changes to SwiftReadability are documented here. The project follows
   default options, with exact serialized output, a supplemental canonical-DOM
   diagnostic, strict raw-input comment overlays, CSSOM oracle cases, and
   focused edge-case tests.
-- Explicit opt-in `ReadabilityExtensions`, including the isolated consumer application
-  profile, while keeping default behavior extension-free.
+- Explicit opt-in `ReadabilityExtensions` for isolated publisher cleanup,
+  content recovery, media handling, and ruby normalization while keeping
+  default behavior extension-free.
 - Release-mode benchmark, immutable dependency, provenance, license, and native
   Linux compatibility gates.
 
@@ -38,5 +49,6 @@ Notable changes to SwiftReadability are documented here. The project follows
   URL property semantics, table span parsing, structured metadata edge cases,
   comment preservation, and browser serialization differences.
 
-[Unreleased]: https://github.com/wolfyy970/swift-readability/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/wolfyy970/swift-readability/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/wolfyy970/swift-readability/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/wolfyy970/swift-readability/compare/0.1.0...0.2.0

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftSoup
 
-/// consumer application's opt-in cleanup policy for publisher-specific article chrome.
+/// Opt-in cleanup policy for publisher-specific article chrome.
 ///
 /// This is intentionally separate from the Mozilla Readability port. Callers must
 /// gate both cleanup phases behind `ReadabilityExtensions.publisherChromeCleanup`.

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftSoup
 
-/// consumer application compatibility extension for JavaScript-driven image galleries.
+/// Opt-in compatibility extension for JavaScript-driven image galleries.
 ///
 /// Mozilla Readability cannot retain images that exist only in hidden carousel
 /// slides after ordinary scoring. This phase converts strongly identified,
