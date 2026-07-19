@@ -141,7 +141,7 @@ npm --prefix Tests/JavaScript ci
 npm --prefix Tests/JavaScript run test:differential
 ```
 
-The differential checks parse success, readerability, metadata, canonical extracted DOM, text content, and Mozilla-compatible UTF-16 length in default, no-extension mode. The current full result is 136/136. It uses the optional `SwiftReadabilityJavaScriptReference` product as an oracle; it does not add JavaScript to the native product.
+The differential checks parse success, readerability, metadata, canonical extracted DOM, text content, and Mozilla-compatible UTF-16 length in default, no-extension mode. The current full result is 136/136. It uses the optional `SwiftReadabilityJavaScriptReference` product as an oracle; it does not add JavaScript to the native product. Mozilla comparisons run in bounded, short-lived fixture batches so multi-megabyte JSDOM pages cannot accumulate across the corpus; injected mismatches and malformed batches are covered by fail-closed tests.
 
 `npm test` also verifies that both oracle files are byte-for-byte Mozilla `ab4027a` using pinned SHA-256 values. A source change therefore fails independently of behavioral fixture results:
 
