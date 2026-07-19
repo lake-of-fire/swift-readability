@@ -147,6 +147,14 @@ enum DOMComparator {
                         mismatchDescription: "Text mismatch. actual=\(actualText.debugDescription) expected=\(expectedText.debugDescription)"
                     )
                 }
+            } else if let aComment = a as? SwiftSoup.Comment,
+                      let eComment = e as? SwiftSoup.Comment {
+                if aComment.getData() != eComment.getData() {
+                    return DOMComparison(
+                        isEqual: false,
+                        mismatchDescription: "Comment mismatch. actual=\(aComment.getData().debugDescription) expected=\(eComment.getData().debugDescription)"
+                    )
+                }
             } else if let aEl = a as? Element, let eEl = e as? Element {
                 let actualAttrs = filteredAttributes(for: aEl)
                 let expectedAttrs = filteredAttributes(for: eEl)
@@ -227,6 +235,9 @@ enum DOMComparator {
         if let text = node as? TextNode {
             return "#text(\(comparableText(text)))"
         }
+        if let comment = node as? SwiftSoup.Comment {
+            return "#comment(\(comment.getData()))"
+        }
         if let element = node as? Element {
             var result = element.tagName().lowercased()
             let id = element.idSafe()
@@ -241,7 +252,7 @@ enum DOMComparator {
     private static func htmlTransform(_ str: String) -> String {
         // Preserve leading/trailing collapsed spaces: spaces at inline element
         // boundaries affect rendered text and are significant to the JS oracle.
-        str.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        javaScriptCollapseWhitespaceRuns(str)
     }
 
     private static func comparableText(_ node: TextNode) -> String {
@@ -251,7 +262,7 @@ enum DOMComparator {
         // The JavaScript oracle beautifies both strings before parsing them.
         // That normalizes indentation immediately before a closing tag, so the
         // native comparator ignores only that terminal formatting whitespace.
-        return transformed.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression)
+        return javaScriptTrimEnd(transformed)
     }
 
     private static func inOrderTraverse(from node: Node) -> Node? {
@@ -268,12 +279,8 @@ enum DOMComparator {
     private static func inOrderIgnoreEmptyTextNodes(from node: Node) -> Node? {
         var current = inOrderTraverse(from: node)
         while let cur = current {
-            if cur is SwiftSoup.Comment {
-                current = inOrderTraverse(from: cur)
-                continue
-            }
             if let text = cur as? TextNode {
-                if text.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if javaScriptIsWhitespaceOnly(text.getWholeText()) {
                     current = inOrderTraverse(from: cur)
                     continue
                 }

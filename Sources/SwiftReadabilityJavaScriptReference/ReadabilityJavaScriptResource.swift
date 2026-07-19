@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 
 /// Loads the pinned Mozilla JavaScript oracle shipped by the optional reference product.

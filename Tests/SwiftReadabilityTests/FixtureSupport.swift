@@ -39,10 +39,16 @@ struct FixtureSuiteManifest: Decodable, Sendable {
 }
 
 struct Fixture: Sendable, CustomStringConvertible {
+    enum ExpectedHTMLSource: String, Sendable {
+        case legacyFixtureSnapshot
+        case rawInputOracleOverlay
+    }
+
     let name: String
     let url: URL
     let source: String
     let expectedHTML: String?
+    let expectedHTMLSource: ExpectedHTMLSource?
     let expectedMetadata: ReadabilityTests.ExpectedMetadata?
     let assertions: FixtureSuiteManifest.FixtureAssertions?
     let extensionProfile: FixtureSuiteManifest.ExtensionProfile?
@@ -170,7 +176,35 @@ struct FixtureRepository: Sendable {
             let sourceURL = directory.appendingPathComponent("source.html")
             let source = try readRequiredText(sourceURL, label: "source", fixtureName: name)
             let expectedHTMLURL = directory.appendingPathComponent("expected.html")
-            let expectedHTML = try readOptionalText(expectedHTMLURL, label: "expected HTML", fixtureName: name)
+            let rawInputExpectedHTMLURL = directory.appendingPathComponent("expected-raw-input.html")
+            let rawInputExpectedHTML = try readOptionalText(
+                rawInputExpectedHTMLURL,
+                label: "raw-input expected HTML",
+                fixtureName: name
+            )
+            let legacyExpectedHTML = try readOptionalText(
+                expectedHTMLURL,
+                label: "expected HTML",
+                fixtureName: name
+            )
+            if rawInputExpectedHTML != nil, legacyExpectedHTML == nil {
+                throw FixtureLoadingError(
+                    message: "Raw-input expected HTML for fixture \(name) requires a legacy expected.html"
+                )
+            }
+            if rawInputExpectedHTML != nil, manifest.extensionProfiles?[name] != nil {
+                throw FixtureLoadingError(
+                    message: "Raw-input Mozilla expected HTML is invalid for extension fixture \(name)"
+                )
+            }
+            let expectedHTML = rawInputExpectedHTML ?? legacyExpectedHTML
+            let expectedHTMLSource: Fixture.ExpectedHTMLSource? = if rawInputExpectedHTML != nil {
+                .rawInputOracleOverlay
+            } else if legacyExpectedHTML != nil {
+                .legacyFixtureSnapshot
+            } else {
+                nil
+            }
             let expectedMetadata = try readExpectedMetadata(
                 directory.appendingPathComponent("expected-metadata.json"),
                 fixtureName: name
@@ -180,8 +214,9 @@ struct FixtureRepository: Sendable {
                 Fixture(
                     name: name,
                     url: baseURL,
-                    source: source.trimmingCharacters(in: .whitespacesAndNewlines),
-                    expectedHTML: expectedHTML?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    source: source,
+                    expectedHTML: expectedHTML,
+                    expectedHTMLSource: expectedHTMLSource,
                     expectedMetadata: expectedMetadata,
                     assertions: manifest.assertions?[name],
                     extensionProfile: manifest.extensionProfiles?[name]
@@ -220,11 +255,21 @@ struct FixtureRepository: Sendable {
     }
 
     private func readRequiredText(_ url: URL, label: String, fixtureName: String) throws -> String {
+        let data: Data
         do {
-            return try String(contentsOf: url, encoding: .utf8)
+            data = try Data(contentsOf: url)
         } catch {
             throw FixtureLoadingError(message: "Unable to read \(label) for fixture \(fixtureName): \(error)")
         }
+        // Foundation's String(contentsOf:encoding:) consumes a leading UTF-8
+        // BOM, while Node's readFileSync(..., "utf8") preserves U+FEFF. Decode
+        // without transport normalization and reject malformed UTF-8 by proving
+        // a byte-for-byte round trip.
+        let value = String(decoding: data, as: UTF8.self)
+        guard Data(value.utf8) == data else {
+            throw FixtureLoadingError(message: "Unable to decode \(label) for fixture \(fixtureName) as valid UTF-8")
+        }
+        return value
     }
 
     private func readOptionalText(_ url: URL, label: String, fixtureName: String) throws -> String? {

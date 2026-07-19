@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 import SwiftSoup
 
@@ -30,12 +33,13 @@ class ProcessorBase {
         }
     }
 
-    /// Finds the next element, starting from the given node, ignoring whitespace text nodes.
+    /// Finds the next element, starting from the given node, ignoring non-element
+    /// nodes whose DOM `textContent` is entirely JavaScript whitespace.
     func nextElement(from node: Node?, regEx: RegExUtil) -> Element? {
         var next: Node? = node
         while let current = next {
             if let element = current as? Element { return element }
-            if let text = current as? TextNode, regEx.isWhitespace(text.getWholeText()) {
+            if isMozillaWhitespaceNonElementNode(current, regEx: regEx) {
                 next = current.nextSibling()
                 continue
             }
@@ -46,8 +50,7 @@ class ProcessorBase {
 
     /// Get the inner text of a node, stripping extra whitespace.
     func getInnerText(_ element: Element, regEx: RegExUtil? = nil, normalizeSpaces: Bool = true) -> String {
-        let textContent = textContentPreservingWhitespace(of: element)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let textContent = javaScriptTrim(textContentPreservingWhitespace(of: element))
         if normalizeSpaces, let regEx {
             return regEx.normalize(textContent)
         }
@@ -59,7 +62,7 @@ class ProcessorBase {
         var stack = element.getChildNodes()
         while let node = stack.popLast() {
             if let text = node as? TextNode {
-                if text.getWholeText().rangeOfCharacter(from: .whitespacesAndNewlines.inverted) != nil {
+                if !javaScriptIsWhitespaceOnly(text.getWholeText()) {
                     return true
                 }
             } else if let el = node as? Element {
@@ -72,15 +75,36 @@ class ProcessorBase {
         return false
     }
 
-    /// Fast length comparisons using UTF-8 byte count as an upper bound.
-    /// Falls back to full character count only when needed.
+    /// Fast JavaScript-length comparison using UTF-8 bytes as an upper bound.
+    /// Falls back to an exact UTF-16 code-unit count only when needed.
     func isTextLengthAtLeast(_ text: String, _ min: Int) -> Bool {
         if text.utf8.count < min { return false }
-        return text.count >= min
+        return javaScriptStringLength(text) >= min
     }
 
+    /// Fast JavaScript-length comparison using UTF-8 bytes as an upper bound.
+    /// Falls back to an exact UTF-16 code-unit count only when needed.
     func isTextLengthLessThan(_ text: String, _ max: Int) -> Bool {
         if text.utf8.count < max { return true }
-        return text.count < max
+        return javaScriptStringLength(text) < max
     }
+}
+
+/// Mozilla's `_nextNode` skips any non-element whose `textContent` matches its
+/// whitespace expression. Comments are observable here: unlike an element's
+/// aggregate `textContent`, a Comment node's own `textContent` is its data.
+func isMozillaWhitespaceNonElementNode(_ node: Node, regEx: RegExUtil) -> Bool {
+    if node is Element { return false }
+    if let text = node as? TextNode {
+        return regEx.isWhitespace(text.getWholeText())
+    }
+    if let data = node as? DataNode {
+        return regEx.isWhitespace(data.getWholeData())
+    }
+    if let comment = node as? Comment {
+        return regEx.isWhitespace(comment.getData())
+    }
+    // For example, DocumentType.textContent is null in the browser. JavaScript
+    // coerces that null to "null" for RegExp.test, so it must not be skipped.
+    return false
 }

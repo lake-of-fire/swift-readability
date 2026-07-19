@@ -38,8 +38,9 @@ struct ReadabilityAPITests {
 
     @Test func parseRejectsOversizedDocuments() throws {
         let html = "<html><head><title>Yo</title></head><body><div>yo</div><span>hi</span></body></html>"
-        let doc = try SwiftSoup.parse(html, baseURL.absoluteString)
-        let numTags = (try? doc.getAllElements().count) ?? 0
+        // Browser getElementsByTagName("*") reports the six descendant
+        // elements and never includes its Document receiver.
+        let browserElementCount = 6
         let reader = Readability(
             html: html,
             url: baseURL,
@@ -50,7 +51,7 @@ struct ReadabilityAPITests {
             _ = try reader.parse()
             #expect(Bool(false), "Expected parse() to throw when exceeding maxElemsToParse")
         } catch {
-            #expect(error.localizedDescription == "Aborting parsing document; \(numTags) elements found")
+            #expect(error.localizedDescription == "Aborting parsing document; \(browserElementCount) elements found")
         }
     }
 

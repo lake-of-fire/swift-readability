@@ -14,6 +14,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-linux:
+    name: Native Linux compatibility
+    runs-on: ubuntu-24.04
+    container: swift:6.2
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report toolchain
+        run: swift --version
+      - name: Native release tests with warnings as errors
+        run: swift test -c release -Xswiftc -warnings-as-errors
+
   swift:
     name: Native, differential, and benchmark gates
     runs-on: macos-26
@@ -32,6 +44,7 @@ jobs:
           swift package resolve
           git diff --exit-code Package.resolved
           grep -q '"version" : "2.13.6"' Package.resolved
+          grep -q '"version" : "0.4.2"' Package.resolved
       - name: Native release tests with warnings as errors
         run: swift test -c release -Xswiftc -warnings-as-errors
       - name: Install reference-test dependencies

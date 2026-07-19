@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 import SwiftSoup
 
@@ -44,7 +47,7 @@ public struct ReadabilityOptions {
     public static let defaultMaxElemsToParse = 0
     /// Mozilla's default number of high-scoring candidate elements to retain.
     public static let defaultNTopCandidates = 5
-    /// Mozilla's default minimum extracted character count before fallback retries.
+    /// Mozilla's default minimum extracted UTF-16 code-unit count before fallback retries.
     public static let defaultCharThreshold = 500
 
     /// Converts the detached extracted article element into HTML.
@@ -56,7 +59,7 @@ public struct ReadabilityOptions {
     public var maxElemsToParse: Int
     /// Number of top-scoring candidates considered during article selection.
     public var nbTopCandidates: Int
-    /// Minimum extracted length before progressively less aggressive retries run.
+    /// Minimum extracted UTF-16 code-unit length before progressively less aggressive retries run.
     public var charThreshold: Int
     /// CSS classes retained when ordinary source classes are stripped.
     public var classesToPreserve: [String]
@@ -64,7 +67,8 @@ public struct ReadabilityOptions {
     public var keepClasses: Bool
     /// Optional HTML serializer used by the non-generic ``Readability/parse()`` API.
     public var serializer: Serializer?
-    /// Requests XML syntax when the supplied SwiftSoup document is itself XML.
+    /// Swift-specific convenience that requests XML syntax when the supplied
+    /// SwiftSoup document is itself XML; Mozilla's JavaScript API has no such option.
     public var useXMLSerializer: Bool
     /// Ignores JSON-LD metadata and uses other document signals when `true`.
     public var disableJSONLD: Bool
@@ -103,6 +107,21 @@ public struct ReadabilityOptions {
         self.allowedVideoRegex = allowedVideoRegex
         self.linkDensityModifier = linkDensityModifier
         self.extensions = extensions
+    }
+
+    /// JavaScript's constructor uses `value || default` for these numeric
+    /// options. Preserve that observable falsy-value behavior at one boundary
+    /// rather than teaching each extraction phase its own version of it.
+    var effectiveTopCandidateCount: Int {
+        nbTopCandidates == 0 ? Self.defaultNTopCandidates : nbTopCandidates
+    }
+
+    var effectiveCharacterThreshold: Int {
+        charThreshold == 0 ? Self.defaultCharThreshold : charThreshold
+    }
+
+    var effectiveLinkDensityModifier: Double {
+        linkDensityModifier.isNaN || linkDensityModifier == 0 ? 0 : linkDensityModifier
     }
 }
 

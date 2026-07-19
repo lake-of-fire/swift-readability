@@ -1,25 +1,44 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 import SwiftSoup
+import WebURL
 
 /// Port of Readability.js metadata extraction (JSON-LD + meta tags).
 final class MetadataParser: ProcessorBase {
     private let regEx: RegExUtil
-    private static let schemaDotOrgRegex = try! NSRegularExpression(
-        pattern: "^https?\\:\\/\\/schema\\.org\\/?$",
-        options: [.caseInsensitive]
-    )
-    private static let jsonLdArticleTypesRegex = try! NSRegularExpression(
-        pattern: "^Article|AdvertiserContentArticle|NewsArticle|AnalysisNewsArticle|AskPublicNewsArticle|BackgroundNewsArticle|OpinionNewsArticle|ReportageNewsArticle|ReviewNewsArticle|Report|SatiricalArticle|ScholarlyArticle|MedicalScholarlyArticle|SocialMediaPosting|BlogPosting|LiveBlogPosting|DiscussionForumPosting|TechArticle|APIReference$",
-        options: []
-    )
-    private static let metaPropertyPattern = try! NSRegularExpression(
-        pattern: "\\s*(article|dc|dcterm|og|twitter)\\s*:\\s*(author|creator|description|published_time|title|site_name)\\s*",
-        options: [.caseInsensitive]
-    )
-    private static let metaNamePattern = try! NSRegularExpression(
-        pattern: "^\\s*(?:(dc|dcterm|og|twitter|parsely|weibo:(article|webpage))\\s*[-\\.:]\\s*)?(author|creator|pub-date|description|title|site_name)\\s*$",
-        options: [.caseInsensitive]
-    )
+    // The pinned expressions use JavaScript anchors. ICU's `$` also matches
+    // before trailing Unicode line terminators, so Foundation regexes cannot
+    // implement these two checks exactly. Their grammar is entirely literal;
+    // direct string operations preserve the intentionally asymmetric anchors.
+    private static let unanchoredJSONLDArticleTypes = [
+        "AdvertiserContentArticle",
+        "NewsArticle",
+        "AnalysisNewsArticle",
+        "AskPublicNewsArticle",
+        "BackgroundNewsArticle",
+        "OpinionNewsArticle",
+        "ReportageNewsArticle",
+        "ReviewNewsArticle",
+        "Report",
+        "SatiricalArticle",
+        "ScholarlyArticle",
+        "MedicalScholarlyArticle",
+        "SocialMediaPosting",
+        "BlogPosting",
+        "LiveBlogPosting",
+        "DiscussionForumPosting",
+        "TechArticle",
+    ]
+    private static let propertyNamespaces = ["article", "dc", "dcterm", "og", "twitter"]
+    private static let nameNamespaces = [
+        "dc", "dcterm", "og", "twitter", "parsely", "weibo:article", "weibo:webpage",
+    ]
+    private static let propertyFields = [
+        "author", "creator", "description", "published_time", "title", "site_name",
+    ]
+    private static let nameFields = ["author", "creator", "pub-date", "description", "title", "site_name"]
     private static let namedEntityRegex = try! NSRegularExpression(
         pattern: "&(quot|amp|apos|lt|gt);",
         options: []
@@ -27,14 +46,6 @@ final class MetadataParser: ProcessorBase {
     private static let numericEntityRegex = try! NSRegularExpression(
         pattern: "&#(?:x([0-9a-f]+)|([0-9]+));",
         options: [.caseInsensitive]
-    )
-    private static let titleSeparatorRegexCI = try! NSRegularExpression(
-        pattern: "\\s[\\|\\-–—\\\\/>»]\\s",
-        options: [.caseInsensitive]
-    )
-    private static let titleSeparatorRegex = try! NSRegularExpression(
-        pattern: "\\s[\\|\\-–—\\\\/>»]\\s",
-        options: []
     )
 
     init(regEx: RegExUtil = RegExUtil()) {
@@ -142,8 +153,6 @@ final class MetadataParser: ProcessorBase {
 
     private func getMetaValues(_ document: Document) -> [String: String] {
         var values: [String: String] = [:]
-        let propertyPattern = MetadataParser.metaPropertyPattern
-        let namePattern = MetadataParser.metaNamePattern
 
         guard let metas = try? document.select("meta") else { return values }
         for element in metas {
@@ -153,31 +162,13 @@ final class MetadataParser: ProcessorBase {
             let elementName = String(decoding: element.attrOrEmptyUTF8(ReadabilityUTF8Arrays.name), as: UTF8.self)
             let elementProperty = String(decoding: element.attrOrEmptyUTF8(ReadabilityUTF8Arrays.property), as: UTF8.self)
 
-            var matchedProperty = false
-
-            if !elementProperty.isEmpty {
-                let range = NSRange(location: 0, length: elementProperty.utf16.count)
-                if let match = propertyPattern.firstMatch(in: elementProperty, options: [], range: range),
-                   let matchedRange = Range(match.range, in: elementProperty) {
-                    let key = elementProperty[matchedRange]
-                        .lowercased()
-                        .replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
-                    values[key] = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                    matchedProperty = true
-                }
+            if !elementProperty.isEmpty, let key = metaPropertyKey(in: elementProperty) {
+                values[key] = javaScriptTrim(content)
+                continue
             }
 
-            if matchedProperty { continue }
-
-            if !elementName.isEmpty {
-                let range = NSRange(location: 0, length: elementName.utf16.count)
-                if namePattern.firstMatch(in: elementName, options: [], range: range) != nil {
-                    let key = elementName
-                        .lowercased()
-                        .replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
-                        .replacingOccurrences(of: ".", with: ":")
-                    values[key] = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
+            if !elementName.isEmpty, let key = metaNameKey(in: elementName) {
+                values[key] = javaScriptTrim(content)
             }
         }
 
@@ -195,17 +186,23 @@ final class MetadataParser: ProcessorBase {
         var datePublished: String?
     }
 
-    private func getJSONLDMetadata(_ document: Document) -> JSONLDMetadata {
-        guard let scripts = try? document.select("script[type=application/ld+json]") else { return JSONLDMetadata() }
+    private enum JSONLDArticleSearch {
+        case match([String: Any])
+        case noMatch
+        case invalidScript
+    }
 
-        func matches(_ regex: NSRegularExpression, _ string: String) -> Bool {
-            regex.firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.utf16.count)) != nil
-        }
+    private func getJSONLDMetadata(_ document: Document) -> JSONLDMetadata {
+        // Mozilla enumerates all script elements and performs exact equality on
+        // the type attribute. SwiftSoup's CSS attribute equality is deliberately
+        // case-insensitive and trims its operand, so a selector here would accept
+        // inputs that the pinned JavaScript authority rejects.
+        guard let scripts = try? document.getElementsByTag("script") else { return JSONLDMetadata() }
 
         for script in scripts {
-            var content = script.data()
-            content = content.replacingOccurrences(of: "^\\s*<!\\[CDATA\\[", with: "", options: .regularExpression)
-            content = content.replacingOccurrences(of: "\\]\\]>\\s*$", with: "", options: .regularExpression)
+            guard script.attrOrEmpty("type") == "application/ld+json" else { continue }
+
+            let content = strippingJSONLDCDATAMarkers(from: script.data())
 
             guard let data = content.data(using: .utf8) else { continue }
             guard let parsed = try? JSONSerialization.jsonObject(with: data, options: []) else { continue }
@@ -213,13 +210,12 @@ final class MetadataParser: ProcessorBase {
             // If JSON-LD is an array, find an entry with a supported @type.
             var candidate: [String: Any]
             if let array = parsed as? [Any] {
-                guard let found = array.compactMap({ $0 as? [String: Any] }).first(where: { dict in
-                    let type = dict["@type"] as? String
-                    return type.map(matchesType) ?? false
-                }) else {
+                switch firstJSONLDArticle(in: array) {
+                case let .match(found):
+                    candidate = found
+                case .noMatch, .invalidScript:
                     continue
                 }
-                candidate = found
             } else if let dict = parsed as? [String: Any] {
                 candidate = dict
             } else {
@@ -230,27 +226,30 @@ final class MetadataParser: ProcessorBase {
             let contextMatches: Bool = {
                 guard let ctx = candidate["@context"] else { return false }
                 if let ctxStr = ctx as? String {
-                    return matches(MetadataParser.schemaDotOrgRegex, ctxStr)
+                    return schemaContextMatches(ctxStr)
                 }
                 if let ctxDict = ctx as? [String: Any],
                    let vocab = ctxDict["@vocab"] as? String {
-                    return matches(MetadataParser.schemaDotOrgRegex, vocab)
+                    return schemaContextMatches(vocab)
                 }
                 return false
             }()
             if !contextMatches { continue }
 
             // If no @type but has @graph, search graph for a supported @type.
-            if candidate["@type"] == nil, let graph = candidate["@graph"] as? [Any] {
-                if let graphObj = graph.compactMap({ $0 as? [String: Any] }).first(where: { dict in
-                    let type = dict["@type"] as? String
-                    return type.map(matchesType) ?? false
-                }) {
-                    candidate = graphObj
+            if !javaScriptJSONValueIsTruthy(candidate["@type"]),
+               let graph = candidate["@graph"] as? [Any] {
+                switch firstJSONLDArticle(in: graph) {
+                case let .match(graphObject):
+                    candidate = graphObject
+                case .noMatch, .invalidScript:
+                    continue
                 }
             }
 
-            guard let typeValue = candidate["@type"] as? String, matchesType(typeValue) else { continue }
+            guard javaScriptJSONValueIsTruthy(candidate["@type"]),
+                  let typeValue = candidate["@type"] as? String,
+                  matchesType(typeValue) else { continue }
 
             var meta = JSONLDMetadata()
 
@@ -262,24 +261,29 @@ final class MetadataParser: ProcessorBase {
                 let nameMatches = textSimilarity(textA: name, textB: htmlTitle) > 0.75
                 let headlineMatches = textSimilarity(textA: headline, textB: htmlTitle) > 0.75
                 if headlineMatches && !nameMatches {
-                    meta.title = headline.trimmingCharacters(in: .whitespacesAndNewlines)
+                    meta.title = headline
                 } else {
-                    meta.title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    meta.title = name
                 }
             } else if let name {
-                meta.title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                meta.title = javaScriptTrim(name)
             } else if let headline {
-                meta.title = headline.trimmingCharacters(in: .whitespacesAndNewlines)
+                meta.title = javaScriptTrim(headline)
             }
 
             if let author = candidate["author"] {
                 if let authorDict = author as? [String: Any],
                    let authorName = authorDict["name"] as? String {
-                    meta.byline = authorName.trimmingCharacters(in: .whitespacesAndNewlines)
-                } else if let authorArray = author as? [Any] {
+                    meta.byline = javaScriptTrim(authorName)
+                } else if let authorArray = author as? [Any],
+                          let firstAuthor = authorArray.first as? [String: Any],
+                          firstAuthor["name"] is String {
+                    // This first-element gate is observable Mozilla behavior:
+                    // malformed leading entries make the whole array ineligible,
+                    // even when a later entry has a valid name.
                     let names = authorArray
                         .compactMap { ($0 as? [String: Any])?["name"] as? String }
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .map(javaScriptTrim(_:))
                     if !names.isEmpty {
                         meta.byline = names.joined(separator: ", ")
                     }
@@ -299,7 +303,7 @@ final class MetadataParser: ProcessorBase {
                     }
                 }
                 meta.creatorNames = meta.creatorNames
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .map(javaScriptTrim(_:))
                     .filter { !$0.isEmpty }
                     .reduce(into: []) { names, name in
                         if !names.contains(name) { names.append(name) }
@@ -307,16 +311,16 @@ final class MetadataParser: ProcessorBase {
             }
 
             if let description = candidate["description"] as? String {
-                meta.excerpt = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                meta.excerpt = javaScriptTrim(description)
             }
 
             if let publisher = candidate["publisher"] as? [String: Any],
                let publisherName = publisher["name"] as? String {
-                meta.siteName = publisherName.trimmingCharacters(in: .whitespacesAndNewlines)
+                meta.siteName = javaScriptTrim(publisherName)
             }
 
             if let datePublished = candidate["datePublished"] as? String {
-                meta.datePublished = datePublished.trimmingCharacters(in: .whitespacesAndNewlines)
+                meta.datePublished = javaScriptTrim(datePublished)
             }
 
             return meta
@@ -325,19 +329,208 @@ final class MetadataParser: ProcessorBase {
         return JSONLDMetadata()
     }
 
+    /// Mirrors the ordered `.find` callback in Mozilla `_getJSONLD`.
+    /// JSON `null` throws on property access in JavaScript; a truthy non-string
+    /// `@type` throws when `.match` is invoked. Either exception rejects the
+    /// current script instead of allowing a later array entry to win.
+    private func firstJSONLDArticle(in values: [Any]) -> JSONLDArticleSearch {
+        for value in values {
+            if value is NSNull {
+                return .invalidScript
+            }
+            guard let dictionary = value as? [String: Any] else {
+                // Property access on other JSON primitives and arrays yields an
+                // absent @type, which is falsey and lets `.find` continue.
+                continue
+            }
+            let type = dictionary["@type"]
+            guard javaScriptJSONValueIsTruthy(type) else { continue }
+            guard let typeString = type as? String else {
+                return .invalidScript
+            }
+            if matchesType(typeString) {
+                return .match(dictionary)
+            }
+        }
+        return .noMatch
+    }
+
+    private func javaScriptJSONValueIsTruthy(_ value: Any?) -> Bool {
+        guard let value, !(value is NSNull) else { return false }
+        if let boolean = value as? Bool { return boolean }
+        if let string = value as? String { return !string.isEmpty }
+        if let number = value as? NSNumber {
+            let double = number.doubleValue
+            return double != 0 && !double.isNaN
+        }
+        // Objects and arrays are truthy, including empty ones.
+        return true
+    }
+
     private func matchesType(_ typeValue: String) -> Bool {
-        return MetadataParser.jsonLdArticleTypesRegex.firstMatch(
-            in: typeValue,
-            options: [],
-            range: NSRange(location: 0, length: typeValue.utf16.count)
-        ) != nil
+        typeValue.hasPrefix("Article") ||
+            MetadataParser.unanchoredJSONLDArticleTypes.contains(where: typeValue.contains(_:)) ||
+            typeValue.hasSuffix("APIReference")
+    }
+
+    private func schemaContextMatches(_ value: String) -> Bool {
+        value == "http://schema.org" ||
+            value == "http://schema.org/" ||
+            value == "https://schema.org" ||
+            value == "https://schema.org/"
     }
 
     // MARK: - Helpers
 
+    /// Returns the first metadata property match, mirroring Mozilla's global,
+    /// unanchored `/\s*(namespace)\s*:\s*(field)\s*/gi` expression. A scalar
+    /// scanner is intentional: Foundation regular expressions implement ICU
+    /// `\s`, whose table differs observably from ECMAScript's.
+    private func metaPropertyKey(in value: String) -> String? {
+        let scalars = Array(value.unicodeScalars)
+        guard !scalars.isEmpty else { return nil }
+
+        for start in scalars.indices {
+            var namespaceStart = start
+            consumeJavaScriptWhitespace(in: scalars, index: &namespaceStart)
+
+            for namespace in MetadataParser.propertyNamespaces {
+                guard var index = endOfASCIICaseInsensitiveMatch(
+                    namespace,
+                    in: scalars,
+                    at: namespaceStart
+                ) else { continue }
+
+                consumeJavaScriptWhitespace(in: scalars, index: &index)
+                guard index < scalars.count, scalars[index].value == 0x3A else { continue }
+                index += 1
+                consumeJavaScriptWhitespace(in: scalars, index: &index)
+
+                for field in MetadataParser.propertyFields {
+                    guard var fieldEnd = endOfASCIICaseInsensitiveMatch(
+                        field,
+                        in: scalars,
+                        at: index
+                    ) else {
+                        continue
+                    }
+                    consumeJavaScriptWhitespace(in: scalars, index: &fieldEnd)
+                    return "\(namespace):\(field)"
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Mirrors Mozilla's anchored metadata `name` pattern and its subsequent
+    /// lowercasing, ECMAScript-whitespace removal, and dot-to-colon rewrite.
+    private func metaNameKey(in value: String) -> String? {
+        let scalars = Array(value.unicodeScalars)
+        var index = 0
+        consumeJavaScriptWhitespace(in: scalars, index: &index)
+        let valueStart = index
+
+        var fieldStart = valueStart
+        for namespace in MetadataParser.nameNamespaces {
+            guard var candidate = endOfASCIICaseInsensitiveMatch(namespace, in: scalars, at: valueStart) else {
+                continue
+            }
+            consumeJavaScriptWhitespace(in: scalars, index: &candidate)
+            guard candidate < scalars.count,
+                  scalars[candidate].value == 0x2D ||
+                    scalars[candidate].value == 0x2E ||
+                    scalars[candidate].value == 0x3A else {
+                continue
+            }
+            candidate += 1
+            consumeJavaScriptWhitespace(in: scalars, index: &candidate)
+            fieldStart = candidate
+            break
+        }
+
+        guard var end = MetadataParser.nameFields.lazy.compactMap({
+            self.endOfASCIICaseInsensitiveMatch($0, in: scalars, at: fieldStart)
+        }).first else {
+            return nil
+        }
+        consumeJavaScriptWhitespace(in: scalars, index: &end)
+        guard end == scalars.count else { return nil }
+
+        var normalized = String.UnicodeScalarView()
+        normalized.reserveCapacity(scalars.count)
+        for scalar in scalars where !javaScriptIsWhitespace(scalar) {
+            let value = scalar.value
+            if value >= 0x41, value <= 0x5A {
+                normalized.append(Unicode.Scalar(value + 0x20)!)
+            } else if value == 0x2E {
+                normalized.append(Unicode.Scalar(0x3A)!)
+            } else {
+                normalized.append(scalar)
+            }
+        }
+        return String(normalized)
+    }
+
+    private func consumeJavaScriptWhitespace(
+        in scalars: [Unicode.Scalar],
+        index: inout Int
+    ) {
+        while index < scalars.count, javaScriptIsWhitespace(scalars[index]) {
+            index += 1
+        }
+    }
+
+    private func endOfASCIICaseInsensitiveMatch(
+        _ literal: String,
+        in scalars: [Unicode.Scalar],
+        at start: Int
+    ) -> Int? {
+        let expected = literal.unicodeScalars
+        guard start + expected.count <= scalars.count else { return nil }
+        var index = start
+        for expectedScalar in expected {
+            let actualValue = scalars[index].value
+            let foldedActual = actualValue >= 0x41 && actualValue <= 0x5A
+                ? actualValue + 0x20
+                : actualValue
+            guard foldedActual == expectedScalar.value else { return nil }
+            index += 1
+        }
+        return index
+    }
+
+    /// Mirrors `/^\s*<!\[CDATA\[|\]\]>\s*$/g` without importing ICU's
+    /// broader whitespace classification.
+    private func strippingJSONLDCDATAMarkers(from source: String) -> String {
+        let opening = Array("<![CDATA[".unicodeScalars)
+        let closing = Array("]]>".unicodeScalars)
+        var scalars = Array(source.unicodeScalars)
+
+        var contentStart = 0
+        consumeJavaScriptWhitespace(in: scalars, index: &contentStart)
+        if scalars.dropFirst(contentStart).starts(with: opening) {
+            scalars.removeFirst(contentStart + opening.count)
+        }
+
+        var contentEnd = scalars.count
+        while contentEnd > 0, javaScriptIsWhitespace(scalars[contentEnd - 1]) {
+            contentEnd -= 1
+        }
+        if contentEnd >= closing.count,
+           scalars[(contentEnd - closing.count)..<contentEnd].elementsEqual(closing) {
+            scalars.removeSubrange((contentEnd - closing.count)..<scalars.count)
+        }
+
+        var result = String.UnicodeScalarView()
+        result.append(contentsOf: scalars)
+        return String(result)
+    }
+
     private func isUrl(_ string: String) -> Bool {
-        guard let url = URL(string: string) else { return false }
-        return url.scheme != nil
+        // Mozilla calls `new URL(string)` without a base. WebURL mirrors that
+        // WHATWG contract; Foundation.URL accepts incomplete URLs (for example
+        // `http://`) and would incorrectly discard them as author metadata.
+        WebURL(string) != nil
     }
 
     private func unescapeHtmlEntities(_ string: String?) -> String? {
@@ -426,7 +619,8 @@ final class MetadataParser: ProcessorBase {
         let uniqJoined = uniqTokensB.joined(separator: " ")
         guard !bJoined.isEmpty else { return 0 }
 
-        let distanceB = Double(uniqJoined.count) / Double(bJoined.count)
+        let distanceB = Double(javaScriptStringLength(uniqJoined)) /
+            Double(javaScriptStringLength(bJoined))
         return 1.0 - distanceB
     }
 
@@ -434,7 +628,15 @@ final class MetadataParser: ProcessorBase {
         var tokens: [String] = []
         var current = ""
         for scalar in text.unicodeScalars {
-            let isWord = CharacterSet.alphanumerics.contains(scalar) || scalar.value == 95
+            // JavaScript `/\W+/` without the Unicode flag defines `\w` as
+            // exactly ASCII letters, digits, and underscore. Foundation's
+            // CharacterSet.alphanumerics is broader and changes title choice
+            // for non-Latin metadata.
+            let value = scalar.value
+            let isWord = (value >= 65 && value <= 90) ||
+                (value >= 97 && value <= 122) ||
+                (value >= 48 && value <= 57) ||
+                value == 95
             if isWord {
                 current.unicodeScalars.append(scalar)
             } else if !current.isEmpty {
@@ -448,56 +650,138 @@ final class MetadataParser: ProcessorBase {
         return tokens
     }
 
+    /// Mirrors the HTML `document.title` getter before Readability applies
+    /// JavaScript `trim()`: only HTML ASCII whitespace is stripped/collapsed.
+    /// SwiftSoup's `Document.title()` uses Swift's broader whitespace model and
+    /// would incorrectly discard U+0085, among other observable characters.
+    private func htmlDocumentTitle(_ document: Document) -> String {
+        guard let titleElements = try? document.getElementsByTag("title"),
+              let titleElement = titleElements.first() else {
+            return ""
+        }
+
+        let rawTitle = textContentPreservingWhitespace(of: titleElement)
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(rawTitle.unicodeScalars.count)
+        var pendingSpace = false
+
+        for scalar in rawTitle.unicodeScalars {
+            switch scalar.value {
+            case 0x0009, 0x000A, 0x000C, 0x000D, 0x0020:
+                if !result.isEmpty { pendingSpace = true }
+            default:
+                if pendingSpace {
+                    result.append(Unicode.Scalar(0x20)!)
+                    pendingSpace = false
+                }
+                result.append(scalar)
+            }
+        }
+
+        return String(result)
+    }
+
     // MARK: - Title extraction (Readability.js _getArticleTitle)
 
     private func getArticleTitle(_ doc: Document) -> String {
         var curTitle = ""
         var origTitle = ""
 
-        if let title = try? doc.title().trimmingCharacters(in: .whitespacesAndNewlines) {
-            curTitle = title
-            origTitle = title
-        }
+        let title = javaScriptTrim(htmlDocumentTitle(doc))
+        curTitle = title
+        origTitle = title
 
         var titleHadHierarchicalSeparators = false
 
         func wordCount(_ str: String) -> Int {
-            str.split(whereSeparator: { $0.isWhitespace }).count
-        }
-
-        let separators: [Character] = ["|", "-", "–", "—", "\\", "/", ">", "»"]
-        func containsSpacedSeparator(_ text: String) -> Bool {
-            for sep in separators {
-                let pattern = "\\s\\" + String(sep) + "\\s"
-                if text.range(of: pattern, options: .regularExpression) != nil {
-                    return true
+            // JavaScript `split(/\s+/)` retains empty fields at either edge,
+            // so its count is one plus the number of whitespace runs.
+            var count = 1
+            var inWhitespace = false
+            for scalar in str.unicodeScalars {
+                if javaScriptIsWhitespace(scalar) {
+                    if !inWhitespace { count += 1 }
+                    inWhitespace = true
+                } else {
+                    inWhitespace = false
                 }
             }
-            return false
+            return count
         }
 
-        if containsSpacedSeparator(curTitle) {
-            titleHadHierarchicalSeparators = curTitle.range(of: "\\s[\\\\/>»]\\s", options: .regularExpression) != nil
-            let ns = origTitle as NSString
-            let matches = MetadataParser.titleSeparatorRegexCI.matches(in: origTitle, options: [], range: NSRange(location: 0, length: ns.length))
-            if let last = matches.last {
-                curTitle = ns.substring(to: last.range.location)
+        let separators = Set<UInt32>([
+            0x7C, 0x2D, 0x2013, 0x2014, 0x5C, 0x2F, 0x3E, 0xBB,
+        ])
+        let hierarchicalSeparators = Set<UInt32>([0x5C, 0x2F, 0x3E, 0xBB])
+
+        func spacedSeparatorMatches(_ text: String, allowed: Set<UInt32>) -> [(start: Int, end: Int)] {
+            let scalars = Array(text.unicodeScalars)
+            guard scalars.count >= 3 else { return [] }
+            var matches: [(start: Int, end: Int)] = []
+            var index = 0
+            while index + 2 < scalars.count {
+                if javaScriptIsWhitespace(scalars[index]),
+                   allowed.contains(scalars[index + 1].value),
+                   javaScriptIsWhitespace(scalars[index + 2]) {
+                    matches.append((index, index + 3))
+                    index += 3 // JavaScript global regular expressions do not overlap.
+                } else {
+                    index += 1
+                }
             }
+            return matches
+        }
+
+        func string(from scalars: ArraySlice<Unicode.Scalar>) -> String {
+            var result = String.UnicodeScalarView()
+            result.append(contentsOf: scalars)
+            return String(result)
+        }
+
+        func removingSpacedSeparators(from text: String) -> String {
+            let scalars = Array(text.unicodeScalars)
+            let matches = spacedSeparatorMatches(text, allowed: separators)
+            guard !matches.isEmpty else { return text }
+            var result = String.UnicodeScalarView()
+            var cursor = 0
+            for match in matches {
+                result.append(contentsOf: scalars[cursor..<match.start])
+                cursor = match.end
+            }
+            result.append(contentsOf: scalars[cursor..<scalars.count])
+            return String(result)
+        }
+
+        let separatorMatches = spacedSeparatorMatches(curTitle, allowed: separators)
+        if let lastSeparator = separatorMatches.last {
+            titleHadHierarchicalSeparators = !spacedSeparatorMatches(
+                curTitle,
+                allowed: hierarchicalSeparators
+            ).isEmpty
+            let titleScalars = Array(origTitle.unicodeScalars)
+            curTitle = string(from: titleScalars[..<lastSeparator.start])
 
             if wordCount(curTitle) < 3 {
-                if let firstIndex = origTitle.firstIndex(where: { separators.contains($0) }) {
-                    curTitle = String(origTitle[origTitle.index(after: firstIndex)...])
+                let titleScalars = Array(origTitle.unicodeScalars)
+                if let firstIndex = titleScalars.firstIndex(where: {
+                    separators.contains($0.value)
+                }) {
+                    curTitle = string(from: titleScalars[(firstIndex + 1)...])
                 }
             }
         } else if curTitle.contains(": ") {
-            let trimmedTitle = curTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedTitle = javaScriptTrim(curTitle)
             let headings = (try? doc.select("h1, h2").array()) ?? []
             var headingTexts = Set<String>()
             headingTexts.reserveCapacity(headings.count)
             for heading in headings {
-                let text = ((try? heading.text()) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty {
-                    headingTexts.insert(text)
+                // DOM textContent preserves descendant whitespace. Element.text()
+                // normalizes it and can manufacture an exact title match that
+                // Mozilla would not observe.
+                let text = textContentPreservingWhitespace(of: heading)
+                let trimmedText = javaScriptTrim(text)
+                if !trimmedText.isEmpty {
+                    headingTexts.insert(trimmedText)
                 }
             }
             let match = headingTexts.contains(trimmedTitle)
@@ -521,12 +805,12 @@ final class MetadataParser: ProcessorBase {
             }
         }
 
-        curTitle = curTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        curTitle = javaScriptTrim(curTitle)
         curTitle = regEx.normalize(curTitle)
 
         let curTitleWordCount = wordCount(curTitle)
         if curTitleWordCount <= 4 {
-            let origWithoutSeps = MetadataParser.titleSeparatorRegex.stringByReplacingMatches(in: origTitle, options: [], range: NSRange(location: 0, length: origTitle.utf16.count), withTemplate: "")
+            let origWithoutSeps = removingSpacedSeparators(from: origTitle)
             if !titleHadHierarchicalSeparators || curTitleWordCount != wordCount(origWithoutSeps) - 1 {
                 curTitle = origTitle
             }

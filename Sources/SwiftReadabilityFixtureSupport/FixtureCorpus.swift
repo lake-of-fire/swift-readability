@@ -51,15 +51,24 @@ public enum FixtureCorpus {
             .map { directory in
                 let name = directory.lastPathComponent
                 let sourceURL = directory.appendingPathComponent("source.html")
-                let html: String
+                let sourceData: Data
                 do {
-                    html = try String(contentsOf: sourceURL, encoding: .utf8)
+                    sourceData = try Data(contentsOf: sourceURL)
                 } catch {
                     throw CorpusError("Unable to read source.html for fixture \(name): \(error)")
                 }
+                // `String(contentsOf:encoding:)` silently consumes a leading
+                // UTF-8 BOM, while the JavaScript oracle's `readFileSync(...,
+                // "utf8")` preserves it as U+FEFF. Decode without transport
+                // normalization, then verify a byte-for-byte UTF-8 round trip
+                // so malformed input still fails closed.
+                let html = String(decoding: sourceData, as: UTF8.self)
+                guard Data(html.utf8) == sourceData else {
+                    throw CorpusError("Unable to decode source.html for fixture \(name) as valid UTF-8")
+                }
                 return ReadabilityFixture(
                     name: name,
-                    html: html.trimmingCharacters(in: .whitespacesAndNewlines),
+                    html: html,
                     url: baseURL
                 )
             }

@@ -93,6 +93,29 @@ struct ReaderableTests {
         let options = Readability.ReaderableOptions(minContentLength: 1000, minScore: 0)
         #expect(Readability.isProbablyReaderable(document: doc, options: options) == false)
     }
+
+    @Test func divWithBreakCandidatesFollowMozillasSetInsertionOrder() throws {
+        let doc = try makeDoc("""
+        <html><body>
+          <div id="first-div">first<br><br></div>
+          <p id="paragraph">paragraph</p>
+          <article id="article">article</article>
+          <div id="second-div">second<br><br></div>
+        </body></html>
+        """)
+        var visitedIDs: [String] = []
+        let options = Readability.ReaderableOptions(
+            minContentLength: 0,
+            minScore: .greatestFiniteMagnitude,
+            visibilityChecker: { element in
+                visitedIDs.append(element.idSafe())
+                return false
+            }
+        )
+
+        #expect(Readability.isProbablyReaderable(doc: doc, options: options) == false)
+        #expect(visitedIDs == ["paragraph", "article", "first-div", "second-div"])
+    }
 }
 
 private extension Readability {

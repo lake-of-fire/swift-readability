@@ -1,0 +1,30 @@
+SwiftReadability
+
+This distribution is a materially modified native Swift implementation in the
+Mozilla Readability, Readability4J, and Lake of Fire SwiftReadability lineage.
+It is not represented as a clean-room implementation.
+
+The Lake of Fire Swift implementation and history retain the BSD 3-Clause
+notice in LICENSE.
+
+Mozilla Readability and implementation material, resources, and fixtures
+derived from it:
+Copyright (c) 2010 Arc90 Inc.
+Licensed under the Apache License, Version 2.0.
+
+Readability4J and implementation material derived from it:
+Copyright (c) 2017 dankito.
+Licensed under the Apache License, Version 2.0.
+
+SwiftSoup:
+Copyright (c) 2009-2025 Jonathan Hedley <https://jsoup.org/>
+Copyright (c) 2016-2025 Nabil Chatbi (Swift port)
+Licensed under the MIT License.
+
+swift-url (WebURL)
+Copyright Karl Wagner, and the swift-url Contributors.
+Licensed under the Apache License, Version 2.0.
+
+See THIRD_PARTY_NOTICES.md, docs/provenance-and-licensing.md, and LICENSES/
+for the component map, exact revisions, complete license texts, and binary
+redistribution guidance.

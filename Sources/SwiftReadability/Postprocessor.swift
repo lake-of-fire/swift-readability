@@ -1,10 +1,18 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 import SwiftSoup
 
 /// Final cleanup after article extraction.
 final class Postprocessor: ProcessorBase {
     private let classesToPreserve: Set<String> = ["page"]
-    private let srcsetUrlPattern = try! NSRegularExpression(pattern: "(\\S+)(\\s+[\\d.]+[xw])?(\\s*(?:,|$))", options: [])
+    // ICU and ECMAScript disagree about `\s`/`\S` (notably U+0085 and U+FEFF).
+    // Spell out ECMA-262's whitespace set so srcset tokenization matches Mozilla.
+    private let srcsetUrlPattern = try! NSRegularExpression(
+        pattern: #"([^\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+)([\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+[0-9.]+[xw])?([\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]*(?:,|$))"#,
+        options: []
+    )
 
     func postProcessContent(originalDocument: Document,
                             articleContent: Element,
@@ -67,7 +75,8 @@ final class Postprocessor: ProcessorBase {
         let onlyChild = element.child(0)
         guard onlyChild.tagNameUTF8() == tagName else { return false }
         for node in element.getChildNodes() {
-            if let text = node as? TextNode, !text.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let text = node as? TextNode,
+               javaScriptHasTrailingNonWhitespace(text.getWholeText()) {
                 return false
             }
         }
@@ -94,116 +103,25 @@ final class Postprocessor: ProcessorBase {
     }
 
     private func fixRelativeUris(originalDocument: Document, element: Element, articleUri: String) {
-        let documentURI = articleUri
-        let baseURI = computeBaseURI(originalDocument: originalDocument, documentURI: documentURI)
-        guard let baseURL = URL(string: baseURI) else { return }
-
-        func normalizedAbsoluteString(_ url: URL) -> String {
-            guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-                return url.absoluteString
-            }
-            if let host = comps.host {
-                comps.host = host.lowercased()
-            }
-            if let scheme = comps.scheme {
-                comps.scheme = scheme.lowercased()
-            }
-            return comps.url?.absoluteString ?? url.absoluteString
-        }
-
-        func percentEncodeForURL(_ uri: String) -> String {
-            // Encode non-ASCII and other disallowed code points while preserving existing URL syntax.
-            let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%")
-            var result = ""
-            result.reserveCapacity(uri.utf16.count)
-            for scalar in uri.unicodeScalars {
-                if allowed.contains(scalar) {
-                    result.append(Character(scalar))
-                } else {
-                    for byte in String(scalar).utf8 {
-                        result += String(format: "%%%02X", byte)
-                    }
-                }
-            }
-            return result
-        }
+        // Mozilla calls the browser's `new URL(reference, baseURI)` here. Foundation.URL
+        // implements different legacy URL rules (notably for backslashes, default ports,
+        // encoded dot-segments, and invalid hosts), so using it would make the extracted
+        // document platform-dependent. WebURL implements the WHATWG parser directly in
+        // Swift and validates it against the browser web-platform-tests.
+        guard let urlContext = BrowserURLContext(
+            document: originalDocument,
+            documentURI: articleUri
+        ) else { return }
 
         func toAbsoluteURI(_ uri: String) -> String {
             // Leave hash links alone if the base URI matches the document URI.
-            if baseURI == documentURI, uri.first == "#" {
+            if urlContext.baseURL == urlContext.documentURL, uri.first == "#" {
                 return uri
             }
-            if uri.lowercased().hasPrefix("data:") {
-                return uri
-            }
-            if uri.lowercased().hasPrefix("file:") {
-                // Match WHATWG URL normalization used by Readability.js.
-                // `new URL("file:///C|/path").href` -> `file:///C:/path`
-                return uri.replacingOccurrences(
-                    of: #"^file:///([A-Za-z])\|/"#,
-                    with: "file:///$1:/",
-                    options: .regularExpression
-                )
-            }
-            if let resolved = URL(string: uri, relativeTo: baseURL)?.absoluteURL {
-                // Match WHATWG URL serialization for origin-only URLs by ensuring a "/" path.
-                guard let host = resolved.host, !host.isEmpty else {
-                    return normalizedAbsoluteString(resolved)
-                }
-                if resolved.path.isEmpty, var comps = URLComponents(url: resolved, resolvingAgainstBaseURL: false) {
-                    comps.path = "/"
-                    if let host = comps.host {
-                        comps.host = host.lowercased()
-                    }
-                    if let scheme = comps.scheme {
-                        comps.scheme = scheme.lowercased()
-                    }
-                    return comps.url?.absoluteString ?? normalizedAbsoluteString(resolved)
-                }
-                return normalizedAbsoluteString(resolved)
-            }
 
-            let encoded = percentEncodeForURL(uri)
-            if encoded != uri, let resolved = URL(string: encoded, relativeTo: baseURL)?.absoluteURL {
-                guard let host = resolved.host, !host.isEmpty else {
-                    return normalizedAbsoluteString(resolved)
-                }
-                if resolved.path.isEmpty, var comps = URLComponents(url: resolved, resolvingAgainstBaseURL: false) {
-                    comps.path = "/"
-                    if let host = comps.host {
-                        comps.host = host.lowercased()
-                    }
-                    if let scheme = comps.scheme {
-                        comps.scheme = scheme.lowercased()
-                    }
-                    return comps.url?.absoluteString ?? normalizedAbsoluteString(resolved)
-                }
-                return normalizedAbsoluteString(resolved)
-            }
-
-            // Foundation URL parsing fails for some strings that WHATWG URL treats as relative (e.g. a
-            // percent-escaped prefix followed by a scheme-like substring). Fall back to manual RFC3986-ish resolution.
-            let baseDir = baseURL.deletingLastPathComponent().absoluteString
-            if encoded.hasPrefix("//"), let scheme = baseURL.scheme {
-                let candidate = scheme.lowercased() + ":" + encoded
-                return URL(string: candidate).map(normalizedAbsoluteString(_:)) ?? candidate
-            }
-            if encoded.hasPrefix("/") {
-                if let scheme = baseURL.scheme, let host = baseURL.host {
-                    let portPart = baseURL.port.map { ":" + String($0) } ?? ""
-                    return scheme.lowercased() + "://" + host.lowercased() + portPart + encoded
-                }
-                return baseDir + encoded.dropFirst()
-            }
-            if encoded.hasPrefix("#") {
-                let baseNoFragment = baseURI.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? baseURI
-                return baseNoFragment + encoded
-            }
-            if encoded.hasPrefix("?") {
-                let baseNoQuery = baseURI.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? baseURI
-                return baseNoQuery + encoded
-            }
-            return baseDir + encoded
+            // The URL constructor is deliberately forgiving for path escapes and deliberately
+            // strict for invalid hosts. A failed parse must preserve the original attribute.
+            return urlContext.resolve(uri) ?? uri
         }
 
         // <a href="">
@@ -211,7 +129,6 @@ final class Postprocessor: ProcessorBase {
         if let links = try? element.select("a") {
             for link in links {
                 let href = String(decoding: link.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if href.isEmpty { continue }
 
                 if href.hasPrefix("javascript:") {
@@ -227,21 +144,18 @@ final class Postprocessor: ProcessorBase {
         if let medias = try? element.select("img, picture, figure, video, audio, source") {
             for media in medias {
                 let src = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.src), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !src.isEmpty {
                     let resolved = toAbsoluteURI(src)
                     _ = try? media.attr(ReadabilityUTF8Arrays.src, resolved.utf8Array)
                 }
 
                 let poster = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.poster), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !poster.isEmpty {
                     let resolved = toAbsoluteURI(poster)
                     _ = try? media.attr(ReadabilityUTF8Arrays.poster, resolved.utf8Array)
                 }
 
                 let srcset = String(decoding: media.attrOrEmptyUTF8(ReadabilityUTF8Arrays.srcset), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !srcset.isEmpty {
                     let newSrcset = replaceMatches(srcsetUrlPattern, in: srcset) { match, nsString in
                         let urlPart = nsString.substring(with: match.range(at: 1))
@@ -254,19 +168,6 @@ final class Postprocessor: ProcessorBase {
                 }
             }
         }
-    }
-
-    private func computeBaseURI(originalDocument: Document, documentURI: String) -> String {
-        guard let documentURL = URL(string: documentURI) else { return documentURI }
-        guard let baseElement = try? originalDocument.select("base[href]").first() else {
-            return documentURI
-        }
-        let baseHref = String(decoding: baseElement.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href), as: UTF8.self)
-        if baseHref.isEmpty { return documentURI }
-
-        let trimmed = baseHref.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return documentURI }
-        return URL(string: trimmed, relativeTo: documentURL)?.absoluteString ?? documentURI
     }
 
     private func replaceJavascriptLink(_ link: Element) {
@@ -317,11 +218,8 @@ final class Postprocessor: ProcessorBase {
 
     private func cleanClasses(node: Element, classesToPreserve: Set<String>) {
         let classAttr = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.class_), as: UTF8.self)
-        var seen: Set<String> = []
-        let keptClassNames = classAttr
-            .split(whereSeparator: { $0.isWhitespace })
-            .map(String.init)
-            .filter { classesToPreserve.contains($0) && seen.insert($0).inserted }
+        let keptClassNames = javaScriptWhitespaceSeparatedTokens(classAttr)
+            .filter(classesToPreserve.contains(_:))
 
         if keptClassNames.isEmpty {
             _ = try? node.removeAttr(ReadabilityUTF8Arrays.class_)
@@ -331,5 +229,28 @@ final class Postprocessor: ProcessorBase {
         for child in node.children() {
             cleanClasses(node: child, classesToPreserve: classesToPreserve)
         }
+    }
+
+    /// Mirrors JavaScript `split(/\s+/)`. Empty edge tokens can be omitted here
+    /// because `_cleanClasses` immediately filters against nonempty class names.
+    private func javaScriptWhitespaceSeparatedTokens(_ text: String) -> [String] {
+        var tokens: [String] = []
+        var current = String.UnicodeScalarView()
+
+        func flushCurrent() {
+            guard !current.isEmpty else { return }
+            tokens.append(String(current))
+            current.removeAll(keepingCapacity: true)
+        }
+
+        for scalar in text.unicodeScalars {
+            if javaScriptIsWhitespace(scalar) {
+                flushCurrent()
+            } else {
+                current.append(scalar)
+            }
+        }
+        flushCurrent()
+        return tokens
     }
 }

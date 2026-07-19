@@ -8,7 +8,10 @@ extension Element {
         (try? attr(key)) ?? []
     }
     func classNameSafe() -> String {
-        (try? className()) ?? ""
+        String(
+            decoding: attrOrEmptyUTF8(ReadabilityUTF8Arrays.class_),
+            as: UTF8.self
+        )
     }
     func idSafe() -> String {
         id()
@@ -17,12 +20,6 @@ extension Element {
         tagName()
     }
 
-    /// Fallback token to detect text mutations when SwiftSoup doesn't expose one.
-    /// Uses the full text hash plus child count to invalidate caches when content changes.
-    func swiftReadabilityTextMutationVersionToken() -> Int {
-        let textHash = textContentPreservingWhitespace(of: self).hashValue
-        return textHash ^ getChildNodes().count
-    }
 }
 
 extension Elements {

@@ -219,7 +219,7 @@ final class PublisherChromeCleaner: ProcessorBase {
       return false
     }
     if text.count > 40 {
-      guard linkDensity(node, text.count) > 0.35 else { return false }
+      guard linkDensity(node, javaScriptStringLength(text)) > 0.35 else { return false }
     }
     return hasFollowingArticleBody(after: node)
   }
@@ -251,7 +251,8 @@ final class PublisherChromeCleaner: ProcessorBase {
       .map { getInnerText($0, regEx: regEx) }
       .joined(separator: " ")
     guard matches(relatedSectionHeadingPattern, in: headingText) else { return false }
-    return linkDensity(node, text.count) > 0.15 || ((try? node.select("a").count) ?? 0) > 0
+    return linkDensity(node, javaScriptStringLength(text)) > 0.15
+      || ((try? node.select("a").count) ?? 0) > 0
   }
 
   private func isPRLabel(_ paragraph: Element) -> Bool {

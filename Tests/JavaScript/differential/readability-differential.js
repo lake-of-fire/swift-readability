@@ -44,6 +44,10 @@ const scalarFields = [
   "excerpt",
   "siteName",
   "publishedTime",
+  // `content` is a public Mozilla result field. Compare its exact browser
+  // `innerHTML` serialization before the semantic DOM diagnostic below so
+  // attribute order, entity spelling, and void syntax cannot be hidden.
+  "content",
   "textContent",
   "length",
 ];
@@ -60,28 +64,17 @@ function fixtureNames() {
   return names;
 }
 
-function removeComments(node) {
-  for (const child of [...node.childNodes]) {
-    if (child.nodeType === child.COMMENT_NODE) {
-      child.remove();
-    } else {
-      removeComments(child);
-    }
-  }
-}
-
 function javascriptResult(name) {
-  const source = fs.readFileSync(path.join(fixtureRoot, name, "source.html"), "utf8").trim();
+  // FixtureCorpus performs the same UTF-8 transport without trimming. The two
+  // parsers must receive identical source text before their DOM work begins.
+  const source = fs.readFileSync(path.join(fixtureRoot, name, "source.html"), "utf8");
   const dom = new JSDOM(source, {
     url: manifest.baseURL || "http://fakehost/test/page.html",
     virtualConsole: quietVirtualConsole,
   });
   try {
-    removeComments(dom.window.document);
     const readerable = isProbablyReaderable(dom.window.document);
-    const result = new Readability(dom.window.document, {
-      classesToPreserve: ["caption"],
-    }).parse();
+    const result = new Readability(dom.window.document).parse();
     return {
       name,
       parsed: result !== null,
@@ -152,7 +145,10 @@ function compareCanonicalDOM(actualHTML, expectedHTML) {
   ]);
 
   function* tokens(node) {
-    if (node.nodeType === node.COMMENT_NODE) return;
+    if (node.nodeType === node.COMMENT_NODE) {
+      yield ["comment", node.data];
+      return;
+    }
     if (node.nodeType === node.TEXT_NODE) {
       let text = node.textContent.replace(/\s+/g, " ");
       if (!text.trim()) return;

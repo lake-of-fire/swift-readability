@@ -75,7 +75,8 @@ final class ImageCarouselNormalizer: ProcessorBase {
 
         let text = getInnerText(node, regEx: regEx)
         guard text.count <= 1_600 else { return false }
-        if text.count > 120, linkDensity(in: node, textLength: text.count) > 0.6 {
+        if text.count > 120,
+           linkDensity(in: node, textLength: javaScriptStringLength(text)) > 0.6 {
             return false
         }
         return true
@@ -227,7 +228,7 @@ final class ImageCarouselNormalizer: ProcessorBase {
             return 0
         }
         let linkLength = links.reduce(0) { partial, link in
-            partial + getInnerText(link, regEx: regEx).count
+            partial + javaScriptStringLength(getInnerText(link, regEx: regEx))
         }
         return Double(linkLength) / Double(textLength)
     }

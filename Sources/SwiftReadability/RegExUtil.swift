@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 
 /// Regex helper mirroring Readability.js REGEXPS.
@@ -33,6 +36,10 @@ final class RegExUtil {
     private let videos: NSRegularExpression
     private let whitespace: NSRegularExpression
     private let hasContent: NSRegularExpression
+    private let videoUsesMozillaIgnoreCaseSemantics: Bool
+    private let usesMozillaNormalizeSemantics: Bool
+    private let usesMozillaWhitespaceSemantics: Bool
+    private let usesMozillaHasContentSemantics: Bool
 
     convenience init(options: ReadabilityOptions) {
         let publisherCleanup = options.extensions.contains(.publisherChromeCleanup)
@@ -67,12 +74,27 @@ final class RegExUtil {
         byline = re(bylinePattern)
         normalize = re(normalizePattern, options: [])
         videos = allowedVideoRegex ?? re(videosPattern)
+        videoUsesMozillaIgnoreCaseSemantics = allowedVideoRegex == nil
         whitespace = re(whitespacePattern, options: [])
         hasContent = re(hasContentPattern, options: [])
+        usesMozillaNormalizeSemantics = normalizePattern == Self.normalizeDefaultPattern
+        usesMozillaWhitespaceSemantics = whitespacePattern == Self.whitespaceDefaultPattern
+        usesMozillaHasContentSemantics = hasContentPattern == Self.hasContentDefaultPattern
     }
 
-    private func matches(_ regex: NSRegularExpression, in string: String) -> Bool {
-        return regex.firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.utf16.count)) != nil
+    private func matches(
+        _ regex: NSRegularExpression,
+        in string: String,
+        legacyIgnoreCase: Bool = true
+    ) -> Bool {
+        let regexInput = legacyIgnoreCase
+            ? javaScriptLegacyIgnoreCaseRegexInput(string)
+            : string
+        return regex.firstMatch(
+            in: regexInput,
+            options: [],
+            range: NSRange(location: 0, length: regexInput.utf16.count)
+        ) != nil
     }
 
     func isPositive(_ s: String) -> Bool { matches(positive, in: s) }
@@ -80,13 +102,26 @@ final class RegExUtil {
     func isUnlikelyCandidate(_ s: String) -> Bool { matches(unlikelyCandidates, in: s) }
     func okMaybeItsACandidate(_ s: String) -> Bool { matches(okMaybeItsACandidate, in: s) }
     func isByline(_ s: String) -> Bool { matches(byline, in: s) }
-    func hasContent(_ s: String) -> Bool { matches(hasContent, in: s) }
-    func isWhitespace(_ s: String) -> Bool { matches(whitespace, in: s) }
+    func hasContent(_ s: String) -> Bool {
+        usesMozillaHasContentSemantics
+            ? javaScriptHasTrailingNonWhitespace(s)
+            : matches(hasContent, in: s, legacyIgnoreCase: false)
+    }
+    func isWhitespace(_ s: String) -> Bool {
+        usesMozillaWhitespaceSemantics
+            ? javaScriptIsWhitespaceOnly(s)
+            : matches(whitespace, in: s, legacyIgnoreCase: false)
+    }
     func normalize(_ text: String) -> String {
+        if usesMozillaNormalizeSemantics {
+            return javaScriptNormalizeWhitespaceRuns(text)
+        }
         let range = NSRange(location: 0, length: text.utf16.count)
         return normalize.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: " ")
     }
-    func isVideo(_ s: String) -> Bool { matches(videos, in: s) }
+    func isVideo(_ s: String) -> Bool {
+        matches(videos, in: s, legacyIgnoreCase: videoUsesMozillaIgnoreCaseSemantics)
+    }
 
     var allowedVideoRegex: NSRegularExpression { videos }
 }

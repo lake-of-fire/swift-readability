@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import SwiftSoup
 
 enum ReadabilityUTF8Arrays {
@@ -70,8 +73,6 @@ enum ReadabilityUTF8Arrays {
     static let tbody = UTF8Arrays.tbody
     static let td = UTF8Arrays.td
     static let th = UTF8Arrays.th
-    static let thead = UTF8Arrays.thead
-    static let tfoot = UTF8Arrays.tfoot
     static let textarea = UTF8Arrays.textarea
     static let time = UTF8Arrays.time
     static let tr = UTF8Arrays.tr
@@ -105,8 +106,6 @@ enum ReadabilityUTF8Arrays {
     static let rel = "rel".utf8Array
     static let role = "role".utf8Array
     static let rules = "rules".utf8Array
-    static let rowspan = "rowspan".utf8Array
-    static let colspan = "colspan".utf8Array
     static let alt = "alt".utf8Array
     static let src = "src".utf8Array
     static let srcset = "srcset".utf8Array

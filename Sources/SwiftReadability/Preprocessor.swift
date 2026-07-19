@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 import SwiftSoup
 
@@ -21,7 +24,6 @@ final class Preprocessor: ProcessorBase {
         }
         removeScripts(document)
         removeStyles(document)
-        removeComments(document)
         replaceBrs(document, regEx: regEx)
         replaceNodes(in: document, tagName: "font", newTagName: "span")
         if extensions.contains(.imageCarouselRecovery) {
@@ -50,20 +52,6 @@ final class Preprocessor: ProcessorBase {
     private func removeScripts(_ document: Document) {
         removeNodes(in: document, tagName: "script")
         removeNodes(in: document, tagName: "noscript")
-    }
-
-    private func removeComments(_ document: Document) {
-        removeCommentNodes(from: document)
-    }
-
-    private func removeCommentNodes(from node: Node) {
-        for child in Array(node.getChildNodes()) {
-            if child.nodeName() == "#comment" {
-                try? child.remove()
-            } else {
-                removeCommentNodes(from: child)
-            }
-        }
     }
 
     // MARK: - Noscript image unwrapping (Readability.js _unwrapNoscriptImages)
@@ -254,7 +242,7 @@ final class Preprocessor: ProcessorBase {
             var next = node
             while let current = next {
                 if current is Element { return current }
-                if let text = current as? TextNode, regEx.isWhitespace(text.getWholeText()) {
+                if isMozillaWhitespaceNonElementNode(current, regEx: regEx) {
                     next = current.nextSibling()
                     continue
                 }

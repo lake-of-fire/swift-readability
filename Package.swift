@@ -31,7 +31,11 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.6")
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.6"),
+        // Mozilla Readability delegates URL resolution to the browser's WHATWG
+        // URL implementation. Foundation.URL follows different legacy rules;
+        // WebURL is the native-Swift, WPT-verified implementation of that contract.
+        .package(url: "https://github.com/karwa/swift-url.git", exact: "0.4.2")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -39,7 +43,8 @@ let package = Package(
         .target(
             name: "SwiftReadability",
             dependencies: [
-                .product(name: "SwiftSoup", package: "SwiftSoup")
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
+                .product(name: "WebURL", package: "swift-url")
             ]
         ),
         .target(

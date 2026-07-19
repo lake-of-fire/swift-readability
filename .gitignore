@@ -69,6 +69,13 @@ fastlane/test_output
 .DS_Store
 DerivedData/
 .netrc
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.mobileprovision
+*.provisionprofile
 
 # Local porting artifacts
 tmp-*/

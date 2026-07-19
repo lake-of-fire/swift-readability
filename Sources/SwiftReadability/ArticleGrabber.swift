@@ -1,3 +1,6 @@
+// Materially modified from the inherited Swift port.
+// See NOTICE and THIRD_PARTY_NOTICES.md for provenance and license terms.
+
 import Foundation
 import SwiftSoup
 
@@ -36,36 +39,6 @@ final class ArticleGrabber: ProcessorBase {
         "pre",
         "table",
         "ul"
-    ]
-    private let blockTagsForTextLength: Set<[UInt8]> = [
-        ReadabilityUTF8Arrays.article,
-        ReadabilityUTF8Arrays.blockquote,
-        ReadabilityUTF8Arrays.dd,
-        ReadabilityUTF8Arrays.dl,
-        ReadabilityUTF8Arrays.div,
-        ReadabilityUTF8Arrays.dt,
-        ReadabilityUTF8Arrays.figure,
-        ReadabilityUTF8Arrays.form,
-        ReadabilityUTF8Arrays.h1,
-        ReadabilityUTF8Arrays.h2,
-        ReadabilityUTF8Arrays.h3,
-        ReadabilityUTF8Arrays.h4,
-        ReadabilityUTF8Arrays.h5,
-        ReadabilityUTF8Arrays.h6,
-        ReadabilityUTF8Arrays.header,
-        ReadabilityUTF8Arrays.li,
-        ReadabilityUTF8Arrays.ol,
-        ReadabilityUTF8Arrays.p,
-        ReadabilityUTF8Arrays.pre,
-        ReadabilityUTF8Arrays.section,
-        ReadabilityUTF8Arrays.table,
-        ReadabilityUTF8Arrays.tbody,
-        ReadabilityUTF8Arrays.td,
-        ReadabilityUTF8Arrays.tfoot,
-        ReadabilityUTF8Arrays.th,
-        ReadabilityUTF8Arrays.thead,
-        ReadabilityUTF8Arrays.tr,
-        ReadabilityUTF8Arrays.ul
     ]
     private let phrasingElems: Set<[UInt8]> = [
         ReadabilityUTF8Arrays.abbr,
@@ -153,8 +126,23 @@ final class ArticleGrabber: ProcessorBase {
         "dialog".utf8Array
     ]
     private static let b64DataUrlRegex = try! NSRegularExpression(
-        pattern: "^data:\\s*([^\\s;,]+)\\s*;\\s*base64\\s*,",
+        pattern: "^data:[\(javaScriptWhitespaceRegexCharacterClassContents)]*" +
+            "([^\(javaScriptWhitespaceRegexCharacterClassContents);,]+)" +
+            "[\(javaScriptWhitespaceRegexCharacterClassContents)]*;" +
+            "[\(javaScriptWhitespaceRegexCharacterClassContents)]*base64" +
+            "[\(javaScriptWhitespaceRegexCharacterClassContents)]*,",
         options: [.caseInsensitive]
+    )
+    private static let lazySrcsetCandidateRegex = try! NSRegularExpression(
+        pattern: "\\.(jpg|jpeg|png|webp)" +
+            "[\(javaScriptWhitespaceRegexCharacterClassContents)]+[0-9]"
+    )
+    private static let lazySrcCandidateRegex = try! NSRegularExpression(
+        pattern: "^[\(javaScriptWhitespaceRegexCharacterClassContents)]*" +
+            "[^\(javaScriptWhitespaceRegexCharacterClassContents)]+" +
+            "\\.(jpg|jpeg|png|webp)" +
+            "[^\(javaScriptWhitespaceRegexCharacterClassContents)]*" +
+            "[\(javaScriptWhitespaceRegexCharacterClassContents)]*$"
     )
 
     private let regEx: RegExUtil
@@ -163,6 +151,7 @@ final class ArticleGrabber: ProcessorBase {
 
     private(set) var articleByline: String?
     private(set) var articleDir: String?
+    private(set) var articleLang: String?
 
     private let nbTopCandidates: Int
     private let charThreshold: Int
@@ -171,40 +160,35 @@ final class ArticleGrabber: ProcessorBase {
     // Dictionaries keyed by Element identity
     private var readabilityObjects: [ObjectIdentifier: ReadabilityObject] = [:]
     private var readabilityDataTable: [ObjectIdentifier: Bool] = [:]
-    private final class LinkDensityCache {
-        var map: [ObjectIdentifier: Double] = [:]
-        var textMutationVersion: Int = -1
-
-        func reset() {
-            map.removeAll(keepingCapacity: true)
-            textMutationVersion = -1
-        }
-    }
-
     init(options: ReadabilityOptions, regEx: RegExUtil? = nil) {
         let regEx = regEx ?? RegExUtil(options: options)
         self.regEx = regEx
         self.extensions = options.extensions
         self.publisherChromeCleaner = PublisherChromeCleaner(regEx: regEx)
-        self.nbTopCandidates = options.nbTopCandidates
-        self.charThreshold = options.charThreshold
-        self.linkDensityModifier = options.linkDensityModifier
+        self.nbTopCandidates = options.effectiveTopCandidateCount
+        self.charThreshold = options.effectiveCharacterThreshold
+        self.linkDensityModifier = options.effectiveLinkDensityModifier
     }
 
     func grabArticle(doc: Document,
                      metadata: ArticleMetadata,
                      options: ArticleGrabberOptions = ArticleGrabberOptions(),
                      pageElement: Element? = nil,
+                     documentURI: String? = nil,
                      timing: TimingSink? = nil) -> Element? {
         // A grabber may be reused by internal clients. Every value below belongs
         // to one extraction, so reset it before touching a new document.
         articleByline = nil
         articleDir = nil
+        articleLang = nil
         readabilityObjects.removeAll(keepingCapacity: true)
         readabilityDataTable.removeAll(keepingCapacity: true)
 
         var options = options
-        let isPaging = pageElement != nil
+        // Mozilla calls `_grabArticle()` with an omitted argument. JavaScript's
+        // `undefined !== null` makes that ordinary path a paging extraction and
+        // exposes `readability-content` to a caller-supplied serializer.
+        let isPaging = true
         let page = pageElement ?? doc.body()
 
         guard let page else { return nil }
@@ -215,9 +199,8 @@ final class ArticleGrabber: ProcessorBase {
         let pageCacheHtml = (try? page.html()) ?? ""
         outputSettings.prettyPrint(pretty: originalPrettyPrint)
 
-        var attempts: [(Element, Int)] = []
+        var attempts: [(articleContent: Element, textLength: Int)] = []
         var textLengthCache: [ObjectIdentifier: Int] = [:]
-        let linkDensityCache = LinkDensityCache()
         while true {
             let elementsToScore = measured("grab.prepareNodes", by: timing) {
                 prepareNodes(
@@ -225,8 +208,7 @@ final class ArticleGrabber: ProcessorBase {
                     metadata: metadata,
                     options: options,
                     timing: timing,
-                    textLengthCache: &textLengthCache,
-                    linkDensityCache: linkDensityCache
+                    textLengthCache: &textLengthCache
                 )
             }
 
@@ -238,24 +220,26 @@ final class ArticleGrabber: ProcessorBase {
                     textLengthCache: &textLengthCache
                 )
             }
-
             let (topCandidate, created) = measured("grab.getTopCandidate", by: timing) {
                 getTopCandidate(
                     page: page,
                     candidates: candidates,
                     options: options,
                     timing: timing,
-                    textLengthCache: &textLengthCache,
-                    linkDensityCache: linkDensityCache
+                    textLengthCache: &textLengthCache
                 )
             }
+
+            // `createArticleContent` moves the selected candidate into a detached
+            // result container. Resolve direction while its original ancestry is
+            // still intact, exactly where Mozilla retains parentOfTopCandidate.
+            let candidateDirection = getTextDirection(topCandidate: topCandidate)
 
             let articleContent = measured("grab.createArticleContent", by: timing) {
                 createArticleContent(
                     doc: doc,
                     topCandidate: topCandidate,
-                    isPaging: isPaging,
-                    linkDensityCache: linkDensityCache
+                    isPaging: isPaging
                 )
             }
 
@@ -264,8 +248,11 @@ final class ArticleGrabber: ProcessorBase {
                     articleContent: articleContent,
                     options: options,
                     metadata: metadata,
-                    timing: timing,
-                    linkDensityCache: linkDensityCache
+                    urlContext: BrowserURLContext(
+                        document: doc,
+                        documentURI: documentURI ?? (doc.location().isEmpty ? "about:blank" : doc.location())
+                    ),
+                    timing: timing
                 )
             }
 
@@ -282,15 +269,16 @@ final class ArticleGrabber: ProcessorBase {
                 _ = try? articleContent.appendChild(div)
             }
 
-            let textLength = getInnerText(articleContent, regEx: regEx, normalizeSpaces: true).count
+            let textLength = javaScriptStringLength(
+                getInnerText(articleContent, regEx: regEx, normalizeSpaces: true)
+            )
             if textLength < self.charThreshold {
                 _ = try? page.html(pageCacheHtml)
                 // Restoring the page HTML replaces the DOM nodes. Any per-node state we keep in
                 // dictionaries must be cleared between attempts to avoid stale lookups (and pointer reuse).
-                readabilityObjects.removeAll(keepingCapacity: true)
+                preserveStableReadabilityStateForRetry(page: page)
                 readabilityDataTable.removeAll(keepingCapacity: true)
                 textLengthCache.removeAll(keepingCapacity: true)
-                linkDensityCache.reset()
 
                 if options.stripUnlikelyCandidates {
                     options.stripUnlikelyCandidates = false
@@ -306,16 +294,40 @@ final class ArticleGrabber: ProcessorBase {
                     continue
                 } else {
                     attempts.append((articleContent, textLength))
-                    attempts.sort { $0.1 > $1.1 }
-                    guard let best = attempts.first, best.1 > 0 else { return nil }
-                    return best.0
+                    // ECMAScript Array.sort is stable: equal-length attempts
+                    // keep the earliest extraction. Swift's sort does not expose
+                    // that guarantee, so select the first strict maximum.
+                    guard var best = attempts.first else { return nil }
+                    for attempt in attempts.dropFirst() where attempt.textLength > best.textLength {
+                        best = attempt
+                    }
+                    guard best.textLength > 0 else { return nil }
+                    // Mozilla returns the longest retained attempt but resolves
+                    // direction from the final candidate search.
+                    articleDir = candidateDirection
+                    return best.articleContent
                 }
             }
 
-            measured("grab.getTextDirection", by: timing) {
-                getTextDirection(topCandidate: topCandidate, doc: doc)
-            }
+            articleDir = candidateDirection
             return articleContent
+        }
+    }
+
+    /// `page.innerHTML = cachedHTML` replaces descendants but not the page or
+    /// its ancestors. Mozilla's WeakMap therefore retains readability state for
+    /// those stable nodes across retries. Preserve exactly that state while
+    /// dropping entries whose DOM identities were invalidated by SwiftSoup.
+    private func preserveStableReadabilityStateForRetry(page: Element) {
+        let stableNodes = [page] + getNodeAncestors(node: page)
+        let stableState = stableNodes.compactMap { node -> (ObjectIdentifier, ReadabilityObject)? in
+            let identifier = ObjectIdentifier(node)
+            guard let value = readabilityObjects[identifier] else { return nil }
+            return (identifier, value)
+        }
+        readabilityObjects.removeAll(keepingCapacity: true)
+        for (identifier, value) in stableState {
+            readabilityObjects[identifier] = value
         }
     }
 
@@ -324,15 +336,25 @@ final class ArticleGrabber: ProcessorBase {
                               metadata: ArticleMetadata,
                               options: ArticleGrabberOptions,
                               timing: TimingSink? = nil,
-                              textLengthCache: inout [ObjectIdentifier: Int],
-                              linkDensityCache: LinkDensityCache) -> [Element] {
+                              textLengthCache: inout [ObjectIdentifier: Int]) -> [Element] {
         var elementsToScore: [Element] = []
-        var node: Element? = doc.body()
+        // Mozilla deliberately traverses from `document.documentElement`, even
+        // though candidate fallback is rooted at `body`. Head descendants can
+        // be removed by visibility/unlikely rules (notably a stale <base>), and
+        // skipping them changes later browser URL resolution.
+        var node: Element? = doc.children().firstSafe
         var shouldRemoveTitleHeader = true
-        let articleTitle = (metadata.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let articleTitle = javaScriptTrim(metadata.title ?? "")
 
         while let current = node {
             let currentTagName = current.tagNameUTF8()
+            if currentTagName == "html".utf8Array {
+                // DOM getAttribute distinguishes a missing value (`null`) from
+                // an explicitly empty value (`""`). Preserve both states.
+                articleLang = current.hasAttr(ReadabilityUTF8Arrays.lang)
+                    ? String(decoding: current.attrOrEmptyUTF8(ReadabilityUTF8Arrays.lang), as: UTF8.self)
+                    : nil
+            }
             let matchString = current.classNameSafe() + " " + current.idSafe()
 
             let isVisible = measured("grab.prepareNodes.visibility", by: timing) {
@@ -346,8 +368,8 @@ final class ArticleGrabber: ProcessorBase {
             // aria-modal + role=dialog content isn't visible to the user.
             let ariaModal = current.attrOrEmptyUTF8(ReadabilityUTF8Arrays.ariaModal)
             let role = current.attrOrEmptyUTF8(ReadabilityUTF8Arrays.role)
-            if ariaModal.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.true_),
-               role.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.dialog) {
+            if ariaModal == ReadabilityUTF8Arrays.true_,
+               role == ReadabilityUTF8Arrays.dialog {
                 node = removeAndGetNext(node: current)
                 continue
             }
@@ -386,7 +408,7 @@ final class ArticleGrabber: ProcessorBase {
                     continue
                 }
 
-                if unlikelyRoles.contains(where: { role.equalsIgnoreCaseASCII($0) }) {
+                if unlikelyRoles.contains(role) {
                     node = removeAndGetNext(node: current)
                     continue
                 }
@@ -430,8 +452,7 @@ final class ArticleGrabber: ProcessorBase {
                     let linkDensity = getLinkDensity(
                         element: current,
                         textLength: currentTextLength,
-                        timing: timing,
-                        cache: linkDensityCache
+                        timing: timing
                     )
                     if linkDensity < 0.25 {
                         let newNode = current.child(0)
@@ -496,7 +517,7 @@ final class ArticleGrabber: ProcessorBase {
 
     private func isWhitespace(_ node: Node) -> Bool {
         if let text = node as? TextNode {
-            return text.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return javaScriptIsWhitespaceOnly(text.getWholeText())
         }
         if let element = node as? Element {
             return element.tagNameUTF8() == ReadabilityUTF8Arrays.br
@@ -529,8 +550,6 @@ final class ArticleGrabber: ProcessorBase {
         return false
     }
 
-    private let displayNonePattern = try! NSRegularExpression(pattern: "display\\s*:\\s*none", options: [.caseInsensitive])
-    private let visibilityHiddenPattern = try! NSRegularExpression(pattern: "visibility\\s*:\\s*hidden", options: [.caseInsensitive])
     private let commasPattern = try! NSRegularExpression(pattern: "[\\u002C\\u060C\\uFE50\\uFE10\\uFE11\\u2E41\\u2E34\\u2E32\\uFF0C]", options: [])
     private let adWordsPattern = try! NSRegularExpression(
         pattern: #"^(ad(vertising|vertisement)?|pub(licité)?|werb(ung)?|广告|Реклама|Anuncio)$"#,
@@ -543,19 +562,17 @@ final class ArticleGrabber: ProcessorBase {
 
     private func isProbablyVisible(_ node: Element) -> Bool {
         let style = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.style), as: UTF8.self)
-        if displayNonePattern.firstMatch(in: style, options: [], range: NSRange(location: 0, length: style.utf16.count)) != nil {
-            return false
-        }
-        if visibilityHiddenPattern.firstMatch(in: style, options: [], range: NSRange(location: 0, length: style.utf16.count)) != nil {
-            return false
+        if browserDOMExposesStyleProperty(node), !style.isEmpty {
+            let declarations = InlineStyleDeclarations(style)
+            if declarations.value(for: "display") == "none" { return false }
+            if declarations.value(for: "visibility") == "hidden" { return false }
         }
         if node.hasAttr(ReadabilityUTF8Arrays.hidden) {
             return false
         }
         if node.hasAttr(ReadabilityUTF8Arrays.ariaHidden),
            node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.ariaHidden) == ReadabilityUTF8Arrays.true_ {
-            let className = node.classNameSafe()
-            if !className.contains("fallback-image") {
+            if !browserDOMClassNameIncludes(node, "fallback-image") {
                 return false
             }
         }
@@ -567,26 +584,40 @@ final class ArticleGrabber: ProcessorBase {
         if let metaByline = metadata.byline, !metaByline.isEmpty { return false }
 
         if isValidByline(node: node, matchString: matchString) {
-            if let nameNode = try? node.select("[itemprop*=name]").first() {
-                articleByline = textContentPreservingWhitespace(of: nameNode)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let nameNode = firstDescendantWithNameItemProp(of: node) {
+                articleByline = javaScriptTrim(textContentPreservingWhitespace(of: nameNode))
             } else {
-                articleByline = textContentPreservingWhitespace(of: node)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                articleByline = javaScriptTrim(textContentPreservingWhitespace(of: node))
             }
             return true
         }
         return false
     }
 
+    /// Mozilla walks descendants in element order and performs a case-sensitive
+    /// `itemprop.includes("name")` check. A CSS selector can include the root or
+    /// apply HTML selector case rules, neither of which is the same contract.
+    private func firstDescendantWithNameItemProp(of node: Element) -> Element? {
+        let endMarker = getNextNode(node: node, ignoreSelfAndKids: true)
+        var descendant = getNextNode(node: node)
+        while let current = descendant, current !== endMarker {
+            if current.attrOrEmpty("itemprop").contains("name") {
+                return current
+            }
+            descendant = getNextNode(node: current)
+        }
+        return nil
+    }
+
     private func isValidByline(node: Element, matchString: String) -> Bool {
         let rel = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.rel), as: UTF8.self)
         let itemprop = String(decoding: node.attrOrEmptyUTF8(ReadabilityUTF8Arrays.itemprop), as: UTF8.self)
-        let bylineText = textContentPreservingWhitespace(of: node)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let bylineText = javaScriptTrim(textContentPreservingWhitespace(of: node))
         let bylineUtf8Length = bylineText.utf8.count
         if bylineUtf8Length == 0 { return false }
-        let bylineLength = bylineUtf8Length < 100 ? bylineUtf8Length : bylineText.count
+        let bylineLength = bylineUtf8Length < 100
+            ? bylineUtf8Length
+            : javaScriptStringLength(bylineText)
 
         return (
             rel == "author" ||
@@ -639,7 +670,8 @@ final class ArticleGrabber: ProcessorBase {
         let joinedAllB = tokensB.joined(separator: " ")
         let joinedUniqB = uniqTokensB.joined(separator: " ")
         guard !joinedAllB.isEmpty else { return 0 }
-        let distanceB = Double(joinedUniqB.utf16.count) / Double(joinedAllB.utf16.count)
+        let distanceB = Double(javaScriptStringLength(joinedUniqB)) /
+            Double(javaScriptStringLength(joinedAllB))
         return 1 - distanceB
     }
 
@@ -688,11 +720,12 @@ final class ArticleGrabber: ProcessorBase {
             let innerText = measured("grab.scoreElements.innerText", by: timing) {
                 getInnerText(element, regEx: regEx)
             }
+            let innerTextLength = javaScriptStringLength(innerText)
             let key = ObjectIdentifier(element)
             if textLengthCache[key] == nil {
-                textLengthCache[key] = innerText.count
+                textLengthCache[key] = innerTextLength
             }
-            if isTextLengthLessThan(innerText, 25) { continue }
+            if innerTextLength < 25 { continue }
             let ancestors = measured("grab.scoreElements.ancestors", by: timing) {
                 getNodeAncestors(node: element, maxDepth: 5)
             }
@@ -704,12 +737,23 @@ final class ArticleGrabber: ProcessorBase {
                 return commasPattern.numberOfMatches(in: innerText, options: [], range: commasRange)
             }
             contentScore += Double(commasCount + 1)
-            if innerText.utf8.count >= 100 {
-                contentScore += min(floor(Double(innerText.count) / 100.0), 3.0)
+            if innerTextLength >= 100 {
+                contentScore += min(
+                    floor(Double(innerTextLength) / 100.0),
+                    3.0
+                )
             }
 
             for (level, ancestor) in ancestors.enumerated() {
-                if ancestor.tagNameUTF8().isEmpty { continue }
+                // Mozilla rejects both a node without `tagName` and a node whose
+                // parent has no `tagName`. SwiftSoup models Document as an
+                // Element named `#root`, so type checks are required to keep the
+                // Document and documentElement out of the candidate map.
+                guard !(ancestor is Document),
+                      !ancestor.tagNameUTF8().isEmpty,
+                      let ancestorParent = ancestor.parent(),
+                      !(ancestorParent is Document),
+                      !ancestorParent.tagNameUTF8().isEmpty else { continue }
                 if getReadabilityObject(element: ancestor) == nil {
                     candidates.append(ancestor)
                     _ = initializeNode(node: ancestor, options: options)
@@ -796,57 +840,16 @@ final class ArticleGrabber: ProcessorBase {
         if normalizeSpaces {
             length = normalizedTextLength(of: element)
         } else {
-            length = getInnerText(element, regEx: regEx, normalizeSpaces: normalizeSpaces).count
+            length = javaScriptStringLength(
+                getInnerText(element, regEx: regEx, normalizeSpaces: normalizeSpaces)
+            )
         }
         cache[key] = length
         return length
     }
 
     private func normalizedTextLength(of element: Element) -> Int {
-        var length = 0
-        var lastWasWhitespace = true
-        var stack = Array(element.getChildNodes().reversed())
-
-        while let node = stack.popLast() {
-            if let text = node as? TextNode {
-                accumulateNormalizedLength(from: text.getWholeText(),
-                                           length: &length,
-                                           lastWasWhitespace: &lastWasWhitespace)
-            } else if let data = node as? DataNode {
-                accumulateNormalizedLength(from: data.getWholeData(),
-                                           length: &length,
-                                           lastWasWhitespace: &lastWasWhitespace)
-            } else if let el = node as? Element {
-                let tagName = el.tagNameUTF8()
-                if tagName == ReadabilityUTF8Arrays.br ||
-                    tagName == ReadabilityUTF8Arrays.hr ||
-                    blockTagsForTextLength.contains(tagName) {
-                    lastWasWhitespace = true
-                }
-
-                let children = el.getChildNodes()
-                if !children.isEmpty {
-                    stack.append(contentsOf: children.reversed())
-                }
-            }
-        }
-        return length
-    }
-
-    private func accumulateNormalizedLength(from text: String,
-                                            length: inout Int,
-                                            lastWasWhitespace: inout Bool) {
-        for scalar in text.unicodeScalars {
-            if scalar.properties.isWhitespace {
-                lastWasWhitespace = true
-                continue
-            }
-            if lastWasWhitespace && length > 0 {
-                length += 1
-            }
-            length += 1
-            lastWasWhitespace = false
-        }
+        javaScriptNormalizedTextLength(textContentPreservingWhitespace(of: element))
     }
 
     // MARK: Third step: top candidate
@@ -854,8 +857,7 @@ final class ArticleGrabber: ProcessorBase {
                                  candidates: [Element],
                                  options: ArticleGrabberOptions,
                                  timing: TimingSink? = nil,
-                                 textLengthCache: inout [ObjectIdentifier: Int],
-                                 linkDensityCache: LinkDensityCache) -> (Element, Bool) {
+                                 textLengthCache: inout [ObjectIdentifier: Int]) -> (Element, Bool) {
         var topCandidates: [Element] = []
 
         for candidate in candidates {
@@ -866,12 +868,11 @@ final class ArticleGrabber: ProcessorBase {
             let candidateScore = readability.contentScore * (1 - getLinkDensity(
                 element: candidate,
                 textLength: candidateTextLength,
-                timing: timing,
-                cache: linkDensityCache
+                timing: timing
             ))
             readability.contentScore = candidateScore
 
-            for t in 0..<nbTopCandidates {
+            for t in 0..<max(0, nbTopCandidates) {
                 let aTopCandidate = topCandidates.count > t ? topCandidates[t] : nil
                 let topReadability = aTopCandidate.flatMap { getReadabilityObject(element: $0) }
                 if aTopCandidate == nil || (topReadability != nil && candidateScore > topReadability!.contentScore) {
@@ -962,18 +963,8 @@ final class ArticleGrabber: ProcessorBase {
 
     private func getLinkDensity(element: Element,
                                 textLength: Int? = nil,
-                                timing: TimingSink? = nil,
-                                cache: LinkDensityCache) -> Double {
-        let currentVersion = element.swiftReadabilityTextMutationVersionToken()
-        if cache.textMutationVersion != currentVersion {
-            cache.map.removeAll(keepingCapacity: true)
-            cache.textMutationVersion = currentVersion
-        }
-        let cacheKey = ObjectIdentifier(element)
-        if let cached = cache.map[cacheKey] {
-            return cached
-        }
-        let textLength = textLength ?? getInnerText(element, regEx: regEx).count
+                                timing: TimingSink? = nil) -> Double {
+        let textLength = textLength ?? javaScriptStringLength(getInnerText(element, regEx: regEx))
         if textLength == 0 { return 0.0 }
         var linkLength = 0.0
         let links: Elements? = measured("grab.getLinkDensity.select", by: timing) {
@@ -983,6 +974,9 @@ final class ArticleGrabber: ProcessorBase {
             var textCache: [ObjectIdentifier: Int] = [:]
             textCache.reserveCapacity(links.count)
             for link in links {
+                // Browser `getElementsByTagName("a")` returns descendants only;
+                // SwiftSoup selector queries include a matching context root.
+                if link === element { continue }
                 let href = link.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href)
                 // Match Readability.js REGEXPS.hashUrl: /^#.+/ (exclude bare "#").
                 let coefficient: Double = (href.count > 1 && href.first == ReadabilityUTF8Arrays.hash.first) ? 0.3 : 1.0
@@ -992,7 +986,7 @@ final class ArticleGrabber: ProcessorBase {
                     linkTextLength = cached
                 } else {
                     linkTextLength = measured("grab.getLinkDensity.innerText", by: timing) {
-                        getInnerText(link, regEx: regEx).count
+                        javaScriptStringLength(getInnerText(link, regEx: regEx))
                     }
                     textCache[identifier] = linkTextLength
                 }
@@ -1000,16 +994,13 @@ final class ArticleGrabber: ProcessorBase {
                 linkLength += Double(linkTextLength) * coefficient
             }
         }
-        let density = linkLength / Double(textLength)
-        cache.map[cacheKey] = density
-        return density
+        return linkLength / Double(textLength)
     }
 
     // MARK: Fourth step: create article content
     private func createArticleContent(doc: Document,
                                       topCandidate: Element,
-                                      isPaging: Bool,
-                                      linkDensityCache: LinkDensityCache) -> Element {
+                                      isPaging: Bool) -> Element {
         let articleContent = (try? doc.createElement("div")) ?? Element(try! Tag.valueOf("div"), "")
         if isPaging {
             _ = try? articleContent.attr(ReadabilityUTF8Arrays.id, ReadabilityUTF8Arrays.readabilityContent)
@@ -1037,11 +1028,10 @@ final class ArticleGrabber: ProcessorBase {
                     append = true
                 } else if shouldKeepSibling(sibling: sibling) {
                     let nodeContent = getInnerText(sibling, regEx: regEx)
-                    let nodeLength = nodeContent.utf8.count < 81 ? nodeContent.utf8.count : nodeContent.count
+                    let nodeLength = javaScriptStringLength(nodeContent)
                     let linkDensity = getLinkDensity(
                         element: sibling,
-                        textLength: nodeLength,
-                        cache: linkDensityCache
+                        textLength: nodeLength
                     )
                     if nodeLength > 80 && linkDensity < 0.25 {
                         append = true
@@ -1075,19 +1065,20 @@ final class ArticleGrabber: ProcessorBase {
     private func prepArticle(articleContent: Element,
                              options: ArticleGrabberOptions,
                              metadata: ArticleMetadata,
-                             timing: TimingSink? = nil,
-                             linkDensityCache: LinkDensityCache) {
+                             urlContext: BrowserURLContext?,
+                             timing: TimingSink? = nil) {
         measured("grab.cleanStyles", by: timing) { cleanStyles(e: articleContent) }
         measured("grab.markDataTables", by: timing) { markDataTables(root: articleContent) }
-        measured("grab.fixLazyImages", by: timing) { fixLazyImages(root: articleContent) }
+        measured("grab.fixLazyImages", by: timing) {
+            fixLazyImages(root: articleContent, urlContext: urlContext)
+        }
 
         measured("grab.cleanConditionally.form", by: timing) {
             cleanConditionally(
                 e: articleContent,
                 tag: "form",
                 options: options,
-                timing: timing,
-                linkDensityCache: linkDensityCache
+                timing: timing
             )
         }
         measured("grab.cleanConditionally.fieldset", by: timing) {
@@ -1095,8 +1086,7 @@ final class ArticleGrabber: ProcessorBase {
                 e: articleContent,
                 tag: "fieldset",
                 options: options,
-                timing: timing,
-                linkDensityCache: linkDensityCache
+                timing: timing
             )
         }
         measured("grab.clean.object", by: timing) { clean(e: articleContent, tag: "object") }
@@ -1105,12 +1095,10 @@ final class ArticleGrabber: ProcessorBase {
         measured("grab.clean.link", by: timing) { clean(e: articleContent, tag: "link") }
         measured("grab.clean.aside", by: timing) { clean(e: articleContent, tag: "aside") }
 
-        let shareRegex = try! NSRegularExpression(pattern: "(\\b|_)(share|sharedaddy)(\\b|_)", options: [.caseInsensitive])
         let shareElementThreshold = ReadabilityOptions.defaultCharThreshold
         for topCandidate in articleContent.children() {
             cleanMatchedNodes(e: topCandidate) { node, matchString in
-                let range = NSRange(location: 0, length: matchString.utf16.count)
-                if shareRegex.firstMatch(in: matchString, options: [], range: range) == nil {
+                if !javaScriptLegacySharePatternMatches(matchString) {
                     return false
                 }
                 let text = textContentPreservingWhitespace(of: node)
@@ -1126,7 +1114,7 @@ final class ArticleGrabber: ProcessorBase {
                     headerDuplicatesTitle(node: heading, articleTitle: articleTitle)
                 },
                 linkDensity: { [self] element, textLength in
-                    getLinkDensity(element: element, textLength: textLength, cache: linkDensityCache)
+                    getLinkDensity(element: element, textLength: textLength)
                 }
             )
         }
@@ -1142,8 +1130,7 @@ final class ArticleGrabber: ProcessorBase {
                 e: articleContent,
                 tag: "table",
                 options: options,
-                timing: timing,
-                linkDensityCache: linkDensityCache
+                timing: timing
             )
         }
         measured("grab.cleanConditionally.ul", by: timing) {
@@ -1151,8 +1138,7 @@ final class ArticleGrabber: ProcessorBase {
                 e: articleContent,
                 tag: "ul",
                 options: options,
-                timing: timing,
-                linkDensityCache: linkDensityCache
+                timing: timing
             )
         }
         measured("grab.cleanConditionally.div", by: timing) {
@@ -1161,8 +1147,7 @@ final class ArticleGrabber: ProcessorBase {
                 tag: "div",
                 options: options,
                 metadata: metadata,
-                timing: timing,
-                linkDensityCache: linkDensityCache
+                timing: timing
             )
         }
 
@@ -1180,7 +1165,7 @@ final class ArticleGrabber: ProcessorBase {
                     isPhrasingContent(element, cache: &phrasingCache)
                 },
                 linkDensity: { [self] element, textLength in
-                    getLinkDensity(element: element, textLength: textLength, cache: linkDensityCache)
+                    getLinkDensity(element: element, textLength: textLength)
                 }
             )
         }
@@ -1246,17 +1231,29 @@ final class ArticleGrabber: ProcessorBase {
         return true
     }
 
-    private func fixLazyImages(root: Element) {
+    private func fixLazyImages(root: Element, urlContext: BrowserURLContext?) {
         guard let nodes = try? root.select("img, picture, figure") else { return }
         for elem in nodes {
-            var src = String(decoding: elem.attrOrEmptyUTF8(ReadabilityUTF8Arrays.src), as: UTF8.self)
-            if !src.isEmpty {
-                let range = NSRange(location: 0, length: src.utf16.count)
-                if let match = ArticleGrabber.b64DataUrlRegex.firstMatch(in: src, options: [], range: range),
+            let isImage = elem.tagNameUTF8() == ReadabilityUTF8Arrays.img
+
+            func imageSourceProperty() -> String {
+                guard isImage, elem.hasAttr(ReadabilityUTF8Arrays.src) else { return "" }
+                let rawSource = String(
+                    decoding: elem.attrOrEmptyUTF8(ReadabilityUTF8Arrays.src),
+                    as: UTF8.self
+                )
+                return urlContext?.resolve(rawSource) ?? rawSource
+            }
+
+            var sourceProperty = imageSourceProperty()
+            if !sourceProperty.isEmpty {
+                let regexInput = javaScriptLegacyIgnoreCaseRegexInput(sourceProperty)
+                let range = NSRange(location: 0, length: regexInput.utf16.count)
+                if let match = ArticleGrabber.b64DataUrlRegex.firstMatch(in: regexInput, options: [], range: range),
                    match.numberOfRanges > 1,
-                   let mimeRange = Range(match.range(at: 1), in: src)
+                   let mimeRange = Range(match.range(at: 1), in: sourceProperty)
                 {
-                    let mimeType = String(src[mimeRange])
+                    let mimeType = String(sourceProperty[mimeRange])
                     if mimeType != "image/svg+xml" {
                         var srcCouldBeRemoved = false
                         if let attrs = elem.getAttributes()?.asList() {
@@ -1273,19 +1270,22 @@ final class ArticleGrabber: ProcessorBase {
 
                         if srcCouldBeRemoved {
                             let b64Starts = match.range(at: 0).length
-                            let b64Length = src.utf16.count - b64Starts
+                            let b64Length = javaScriptStringLength(sourceProperty) - b64Starts
                             if b64Length < 133 {
                                 _ = try? elem.removeAttr(ReadabilityUTF8Arrays.src)
-                                src = String(decoding: elem.attrOrEmptyUTF8(ReadabilityUTF8Arrays.src), as: UTF8.self)
+                                sourceProperty = imageSourceProperty()
                             }
                         }
                     }
                 }
             }
 
-            let srcset = String(decoding: elem.attrOrEmptyUTF8(ReadabilityUTF8Arrays.srcset), as: UTF8.self)
+            let srcset = isImage
+                ? String(decoding: elem.attrOrEmptyUTF8(ReadabilityUTF8Arrays.srcset), as: UTF8.self)
+                : ""
             let hasSrcSet = !srcset.isEmpty && srcset != "null"
-            if (!src.isEmpty || hasSrcSet) && !elem.classNameSafe().lowercased().contains("lazy") {
+            if (!sourceProperty.isEmpty || hasSrcSet) &&
+                !elem.classNameSafe().lowercased().contains("lazy") {
                 continue
             }
 
@@ -1299,9 +1299,16 @@ final class ArticleGrabber: ProcessorBase {
                 }
                 let value = String(decoding: attr.getValueUTF8(), as: UTF8.self)
                 var copyTo: String?
-                if value.range(of: "\\.(jpg|jpeg|png|webp)\\s+\\d", options: [.regularExpression, .caseInsensitive]) != nil {
+                let valueRange = NSRange(location: 0, length: value.utf16.count)
+                if ArticleGrabber.lazySrcsetCandidateRegex.firstMatch(
+                    in: value,
+                    range: valueRange
+                ) != nil {
                     copyTo = "srcset"
-                } else if value.range(of: "^\\s*\\S+\\.(jpg|jpeg|png|webp)\\S*\\s*$", options: [.regularExpression, .caseInsensitive]) != nil {
+                } else if ArticleGrabber.lazySrcCandidateRegex.firstMatch(
+                    in: value,
+                    range: valueRange
+                ) != nil {
                     copyTo = "src"
                 }
 
@@ -1345,7 +1352,7 @@ final class ArticleGrabber: ProcessorBase {
         guard let tables = try? root.getElementsByTag("table") else { return }
         for table in tables {
             let role = (try? table.attr(ReadabilityUTF8Arrays.role)) ?? []
-            if role.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.presentation) { setReadabilityDataTable(table: table, value: false); continue }
+            if role == ReadabilityUTF8Arrays.presentation { setReadabilityDataTable(table: table, value: false); continue }
             let datatable = (try? table.attr(ReadabilityUTF8Arrays.datatable)) ?? []
             if datatable.equalsIgnoreCaseASCII(ReadabilityUTF8Arrays.zero) { setReadabilityDataTable(table: table, value: false); continue }
             let summary = (try? table.attr(ReadabilityUTF8Arrays.summary)) ?? []
@@ -1372,7 +1379,7 @@ final class ArticleGrabber: ProcessorBase {
                 setReadabilityDataTable(table: table, value: false); continue
             }
 
-            let sizeInfo = getRowAndColumnCount(table: table)
+            let sizeInfo = readabilityTableDimensions(table)
             // single column/row tables are commonly used for page layout purposes.
             if sizeInfo.0 == 1 || sizeInfo.1 == 1 {
                 setReadabilityDataTable(table: table, value: false); continue
@@ -1384,27 +1391,10 @@ final class ArticleGrabber: ProcessorBase {
         }
     }
 
-    private func getRowAndColumnCount(table: Element) -> (Int, Int) {
-        var rows = 0
-        var columns = 0
-        if let trs = try? table.getElementsByTag("tr") {
-        for tr in trs {
-            let rowspan = (try? tr.attr(ReadabilityUTF8Arrays.rowspan)) ?? []
-            rows += Int(String(decoding: rowspan, as: UTF8.self)) ?? 1
-            var colsInRow = 0
-            if let cells = try? tr.getElementsByTag("td") {
-            for cell in cells {
-                let colspan = (try? cell.attr(ReadabilityUTF8Arrays.colspan)) ?? []
-                colsInRow += Int(String(decoding: colspan, as: UTF8.self)) ?? 1
-            }}
-            columns = max(columns, colsInRow)
-        }
-        }
-        return (rows, columns)
-    }
-
     private func getTextDensity(_ element: Element, tags: [String], textLength: Int? = nil, timing: TimingSink? = nil) -> Double {
-        let textLength = textLength ?? getInnerText(element, regEx: regEx, normalizeSpaces: true).count
+        let textLength = textLength ?? javaScriptStringLength(
+            getInnerText(element, regEx: regEx, normalizeSpaces: true)
+        )
         if textLength == 0 { return 0 }
 
         let selector = tags
@@ -1427,7 +1417,9 @@ final class ArticleGrabber: ProcessorBase {
                 childLength = cached
             } else {
                 childLength = measured("grab.getTextDensity.innerText", by: timing) {
-                    getInnerText(child, regEx: regEx, normalizeSpaces: true).count
+                    javaScriptStringLength(
+                        getInnerText(child, regEx: regEx, normalizeSpaces: true)
+                    )
                 }
                 textCache[identifier] = childLength
             }
@@ -1440,8 +1432,7 @@ final class ArticleGrabber: ProcessorBase {
                                     tag: String,
                                     options: ArticleGrabberOptions,
                                     metadata: ArticleMetadata? = nil,
-                                    timing: TimingSink? = nil,
-                                    linkDensityCache: LinkDensityCache) {
+                                    timing: TimingSink? = nil) {
         if options.cleanConditionally == false { return }
         let initialIsList = tag == "ul" || tag == "ol"
 
@@ -1453,7 +1444,7 @@ final class ArticleGrabber: ProcessorBase {
             let innerText = measured("grab.cleanConditionally.innerText", by: timing) {
                 self.getInnerText(node, regEx: self.regEx)
             }
-            let innerTextLength = innerText.count
+            let innerTextLength = javaScriptStringLength(innerText)
             var nodeLength = 0
             if !isList {
                 nodeLength = innerTextLength
@@ -1463,7 +1454,9 @@ final class ArticleGrabber: ProcessorBase {
                 if nodeLength > 0, let listNodes {
                     var listLength = 0
                     for list in listNodes {
-                        listLength += self.getInnerText(list, regEx: self.regEx).count
+                        listLength += javaScriptStringLength(
+                            self.getInnerText(list, regEx: self.regEx)
+                        )
                     }
                     isList = Double(listLength) / Double(nodeLength) > 0.9
                 }
@@ -1514,7 +1507,7 @@ final class ArticleGrabber: ProcessorBase {
                                 }
                             }
                         }
-                        if embed.tagNameUTF8() == ReadabilityUTF8Arrays.object, self.regEx.isVideo((try? embed.html()) ?? "") {
+                        if browserDOMTagName(embed, equals: "object"), self.regEx.isVideo((try? embed.html()) ?? "") {
                             return false
                         }
                         embedCount += 1
@@ -1523,8 +1516,7 @@ final class ArticleGrabber: ProcessorBase {
                 let linkDensity = self.getLinkDensity(
                     element: node,
                     textLength: innerTextLength,
-                    timing: timing,
-                    cache: linkDensityCache
+                    timing: timing
                 )
                 if self.extensions.contains(.articleBodyPreservation),
                    self.shouldPreserveLikelyArticleBody(
@@ -1537,6 +1529,9 @@ final class ArticleGrabber: ProcessorBase {
                 ) {
                     return false
                 }
+                // These two Mozilla expressions carry the Unicode (`u`) flag,
+                // unlike its other legacy `/i` patterns. ICU's Unicode-aware
+                // folding is therefore the intended behavior here.
                 let innerTextRange = NSRange(location: 0, length: innerText.utf16.count)
                 if self.adWordsPattern.firstMatch(in: innerText, options: [], range: innerTextRange) != nil ||
                    self.loadingWordsPattern.firstMatch(in: innerText, options: [], range: innerTextRange) != nil {
@@ -1668,11 +1663,18 @@ final class ArticleGrabber: ProcessorBase {
         let isEmbed = embeddedNodes.contains(tag.utf8Array)
         removeNodes(in: e, tagName: tag) { element in
             if isEmbed {
-                let attributeValues = element.getAttributes()?.asList()
-                    .map { String(decoding: $0.getValueUTF8(), as: UTF8.self) }
-                    .joined(separator: "|") ?? ""
-                if self.regEx.isVideo(attributeValues) { return false }
-                if self.regEx.isVideo((try? element.html()) ?? "") { return false }
+                if let attributes = element.getAttributes()?.asList() {
+                    for attribute in attributes {
+                        let value = String(decoding: attribute.getValueUTF8(), as: UTF8.self)
+                        if self.regEx.isVideo(value) { return false }
+                    }
+                }
+                // Mozilla inspects innerHTML only for <object>; iframe/embed
+                // descendants must not accidentally satisfy the video allowlist.
+                if browserDOMTagName(element, equals: "object"),
+                   self.regEx.isVideo((try? element.html()) ?? "") {
+                    return false
+                }
             }
             return true
         }
@@ -1719,21 +1721,22 @@ final class ArticleGrabber: ProcessorBase {
         return nil
     }
 
-    private func getTextDirection(topCandidate: Element, doc: Document) {
+    private func getTextDirection(topCandidate: Element) -> String? {
         var ancestors: [Element] = []
-        if let parent = topCandidate.parent() { ancestors.append(parent) }
+        let originalParent = topCandidate.parent()
+        if let originalParent { ancestors.append(originalParent) }
         ancestors.append(topCandidate)
-        ancestors.append(contentsOf: getNodeAncestors(node: topCandidate.parent() ?? topCandidate))
-        if let body = doc.body() { ancestors.append(body) }
-        if let html = try? doc.select("html").first() { ancestors.append(html) }
+        if let originalParent {
+            ancestors.append(contentsOf: getNodeAncestors(node: originalParent))
+        }
 
         for ancestor in ancestors {
             let dir = String(decoding: (try? ancestor.attr(ReadabilityUTF8Arrays.dir)) ?? [], as: UTF8.self)
             if !dir.isEmpty {
-                self.articleDir = dir
-                return
+                return dir
             }
         }
+        return nil
     }
 
     private func getReadabilityObject(element: Element) -> ReadabilityObject? {

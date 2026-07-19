@@ -33,7 +33,7 @@ struct ParitySupplementaryTests {
         #expect(result?.content.contains("new.") == true)
     }
 
-    @Test func xmlSerializerOptionProducesXMLSyntax() throws {
+    @Test func xmlSerializerOptionDoesNotOverrideHTMLFragmentSyntax() throws {
         let html = "<html><body><p>hello there hello there hello there hello there hello there hello there hello there hello there hello there hello there.</p><p><img src=\"\"></p></body></html>"
         let reader = Readability(
             html: html,
@@ -45,10 +45,11 @@ struct ParitySupplementaryTests {
             return
         }
         #expect(result.content.contains("<img"))
-        #expect(result.content.contains("/>"))
+        #expect(result.content.contains("<img src=\"\">"))
+        #expect(!result.content.contains("/>"))
     }
 
-    @Test func htmlSerializerDefaultUsesHtmlBooleanSyntax() throws {
+    @Test func htmlSerializerPreservesExplicitBooleanAttributeValue() throws {
         let html = """
         <html>
           <body>
@@ -68,7 +69,7 @@ struct ParitySupplementaryTests {
             return
         }
         #expect(result.content.contains("itemscope"))
-        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
+        #expect(result.content.contains("itemscope=\"itemscope\""))
     }
 
     @Test func xmlSerializerDoesNotForceXMLForHTMLInput() throws {
@@ -91,7 +92,7 @@ struct ParitySupplementaryTests {
             return
         }
         #expect(result.content.contains("itemscope"))
-        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
+        #expect(result.content.contains("itemscope=\"itemscope\""))
     }
 
     @Test func disableJSONLDSkipsStructuredData() throws {
@@ -172,7 +173,7 @@ struct ParitySupplementaryTests {
         #expect(result.content.contains("dropme"))
     }
 
-    @Test func xmlSerializerDoesNotPromoteHTMLBooleanAttributeValues() throws {
+    @Test func xmlSerializerOptionPreservesHTMLBooleanAttributeValues() throws {
         let html = """
         <html>
           <body>
@@ -192,7 +193,7 @@ struct ParitySupplementaryTests {
             return
         }
         #expect(result.content.contains("itemscope"))
-        #expect(result.content.contains("itemscope=\"itemscope\"") == false)
+        #expect(result.content.contains("itemscope=\"itemscope\""))
     }
 
     @Test func maxElemsToParseAppliesToDocumentPipeline() throws {

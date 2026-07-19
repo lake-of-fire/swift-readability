@@ -29,13 +29,32 @@ struct DOMComparatorTests {
         #expect(comparison.isEqual)
     }
 
-    @Test func whitespaceOnlyNodesAndCommentsAreIgnored() {
+    @Test func whitespaceOnlyNodesAreIgnored() {
         let comparison = DOMComparator.compare(
-            actualHTML: "<div>\n<!-- implementation note --><p>Text</p>\n</div>",
+            actualHTML: "<div>\n<p>Text</p>\n</div>",
             expectedHTML: "<div><p>Text</p></div>"
         )
 
         #expect(comparison.isEqual)
+    }
+
+    @Test func commentsAreObservable() {
+        let missing = DOMComparator.compare(
+            actualHTML: "<div><!-- implementation note --><p>Text</p></div>",
+            expectedHTML: "<div><p>Text</p></div>"
+        )
+        let changed = DOMComparator.compare(
+            actualHTML: "<div><!-- first --><p>Text</p></div>",
+            expectedHTML: "<div><!-- second --><p>Text</p></div>"
+        )
+        let identical = DOMComparator.compare(
+            actualHTML: "<div><!-- retained --><p>Text</p></div>",
+            expectedHTML: "<div><!-- retained --><p>Text</p></div>"
+        )
+
+        #expect(!missing.isEqual)
+        #expect(!changed.isEqual)
+        #expect(identical.isEqual)
     }
 
     @Test func attributeOrderIsSignificantLikeTheJavaScriptOracle() {

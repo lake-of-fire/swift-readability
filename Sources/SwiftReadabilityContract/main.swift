@@ -58,8 +58,7 @@ private func run() throws {
         let readerable = Readability.isProbablyReaderable(html: fixture.html)
         let result = try Readability(
             html: fixture.html,
-            url: fixture.url,
-            options: ReadabilityOptions(classesToPreserve: ["caption"], useXMLSerializer: true)
+            url: fixture.url
         ).parse()
         return ContractResult(
             name: fixture.name,

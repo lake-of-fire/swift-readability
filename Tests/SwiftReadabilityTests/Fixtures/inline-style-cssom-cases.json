@@ -1,0 +1,218 @@
+[
+  {
+    "name": "display none",
+    "style": "display:none",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "visibility hidden",
+    "style": "visibility:hidden",
+    "display": null,
+    "visibility": "hidden"
+  },
+  {
+    "name": "later normal declaration wins",
+    "style": "display:none;display:block",
+    "display": "block",
+    "visibility": null
+  },
+  {
+    "name": "first important declaration locks the property",
+    "style": "display:none!important;display:block",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "first important declaration also beats later important",
+    "style": "display:block!important;display:none!important",
+    "display": "block",
+    "visibility": null
+  },
+  {
+    "name": "css-tree treats any priority identifier as important",
+    "style": "display:none!foo;display:block",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "escaped priority identifier is accepted",
+    "style": "display:none!\\69mportant;display:block",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "comments are allowed around priority",
+    "style": "display:none/**/ !/**/foo;display:block",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "comment splits a property identifier",
+    "style": "dis/**/play:none",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "comments around a property identifier are whitespace",
+    "style": "/**/display/**/:none",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "comment splits a value identifier",
+    "style": "display:n/**/one",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "comment separates compound display identifiers",
+    "style": "display:block/* split */flow",
+    "display": "block",
+    "visibility": null
+  },
+  {
+    "name": "escaped property identifier is not canonicalized by pinned cssom",
+    "style": "d\\69 splay:none",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "escaped display value is not canonicalized by pinned cssom",
+    "style": "display:n\\6f ne",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "escaped visibility value is not canonicalized by pinned cssom",
+    "style": "visibility:h\\69 dden",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "escaped semicolon cannot inject a display declaration",
+    "style": "color:red\\;display:none;",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "square block cannot inject a display declaration",
+    "style": "unknown:[x;display:none;]",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "curly block cannot inject a visibility declaration",
+    "style": "unknown:{x;visibility:hidden;}",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "bad string newline resumes declaration parsing",
+    "style": "unknown:\"bad\n;display:none",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "escaped newline keeps a string open",
+    "style": "unknown:\"bad\\\n;display:none",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "unmatched opening parenthesis contains following declarations",
+    "style": "display:(none;visibility:hidden",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "unmatched closing parenthesis recovers at semicolon",
+    "style": "display:none);visibility:hidden",
+    "display": null,
+    "visibility": "hidden"
+  },
+  {
+    "name": "var function later in value bypasses display grammar",
+    "style": "display:none;display:block var(--layout)",
+    "display": "block var(--layout)",
+    "visibility": null
+  },
+  {
+    "name": "comment before var is preserved by cssom",
+    "style": "display:none;display:block/**/var(--layout)/**/",
+    "display": "block/**/var(--layout)/**/",
+    "visibility": null
+  },
+  {
+    "name": "uppercase var does not bypass display grammar",
+    "style": "display:none;display:VAR(--layout)",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "var substring in a string triggers pinned cssom bypass",
+    "style": "display:none;display:\" var(--layout)\"",
+    "display": "\" var(--layout)\"",
+    "visibility": null
+  },
+  {
+    "name": "force-hidden is a valid later visibility value",
+    "style": "visibility:hidden;visibility:force-hidden",
+    "display": null,
+    "visibility": "force-hidden"
+  },
+  {
+    "name": "invalid list item combination preserves prior display",
+    "style": "display:none;display:flex list-item",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "valid list item combination replaces prior display",
+    "style": "display:none;display:inline flow-root list-item",
+    "display": "inline flow-root list-item",
+    "visibility": null
+  },
+  {
+    "name": "nonstandard display keyword is valid in pinned cssom",
+    "style": "display:none;display:-moz-inline-stack",
+    "display": "-moz-inline-stack",
+    "visibility": null
+  },
+  {
+    "name": "lexer-valid unsupported compound clears display descriptor",
+    "style": "display:none;display:block math",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "important unsupported compound locks empty display",
+    "style": "display:block math!important;display:none",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "ecmascript nbsp trim is applied by pinned cssom",
+    "style": "display:\u00a0none\u00a0",
+    "display": "none",
+    "visibility": null
+  },
+  {
+    "name": "next-line is not ecmascript trim whitespace",
+    "style": "display:none\u0085",
+    "display": null,
+    "visibility": null
+  },
+  {
+    "name": "arbitrary priority identifier applies to visibility",
+    "style": "visibility:hidden;visibility:visible ! foo",
+    "display": null,
+    "visibility": "visible"
+  },
+  {
+    "name": "unterminated trailing comment retains preceding value",
+    "style": "display:none/* unterminated",
+    "display": "none",
+    "visibility": null
+  }
+]
