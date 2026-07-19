@@ -4,6 +4,12 @@ A pure Swift implementation of [Mozilla Readability](https://github.com/mozilla/
 
 SwiftReadability extracts the primary article from an HTML document without a browser, JavaScript runtime, Node, or network service. It also ships the aligned Readability.js sources as optional package resources for browser integrations and cross-implementation parity testing.
 
+## Architecture
+
+SwiftReadability is designed as a standalone library rather than application-specific source code. macOS, iOS, server, and command-line clients can depend on the package through Swift Package Manager and share the same extraction behavior.
+
+The production path is entirely native Swift. [SwiftSoup](https://github.com/scinfu/SwiftSoup) provides HTML parsing and DOM operations; SwiftReadability owns article scoring, cleanup, metadata extraction, serialization, and Readability compatibility. Keeping those responsibilities separate avoids embedding an incomplete HTML parser here while requiring no JavaScript engine, Node process, browser view, or service at runtime. The bundled JavaScript files are an optional browser reference and behavioral oracle, not a dependency of native extraction.
+
 ## Requirements
 
 - Swift 6.2
