@@ -25,13 +25,6 @@ public enum ReadabilityJavaScriptResource {
         ) {
             return url
         }
-        if let url = Bundle.module.url(
-            forResource: "Readability",
-            withExtension: "js",
-            subdirectory: "tmp-readability"
-        ) {
-            return url
-        }
         throw CocoaError(.fileNoSuchFile)
     }
 
@@ -46,13 +39,6 @@ public enum ReadabilityJavaScriptResource {
             forResource: "Readability-readerable",
             withExtension: "js",
             subdirectory: "Resources"
-        ) {
-            return url
-        }
-        if let url = Bundle.module.url(
-            forResource: "Readability-readerable",
-            withExtension: "js",
-            subdirectory: "tmp-readability"
         ) {
             return url
         }

@@ -1,5 +1,0 @@
-/benchmarks/
-/test/
-.gitattributes
-.release-it.json
-.taskcluster.yml
