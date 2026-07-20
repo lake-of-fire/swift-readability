@@ -6,7 +6,7 @@ See [`docs/provenance-and-licensing.md`](docs/provenance-and-licensing.md) for t
 
 ## Lake of Fire SwiftReadability
 
-This repository is a fork of the SwiftReadability implementation published by Lake of Fire. That implementation supplied the initial Swift scaffolding and remains part of this repository's provenance and Git history. Its BSD 3-Clause license and 2025 Lake of Fire copyright notice are preserved in [`LICENSE`](LICENSE).
+This repository is a fork of the SwiftReadability implementation published by Lake of Fire. That implementation established the native Swift foundation and remains part of this repository's provenance and Git history. Its BSD 3-Clause license and 2025 Lake of Fire copyright notice are preserved in [`LICENSE`](LICENSE).
 
 The Lake of Fire implementation is credited as lineage, not treated as the behavioral specification for current work. Compatibility decisions are validated directly against the pinned Mozilla Readability implementation described below.
 

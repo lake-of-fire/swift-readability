@@ -2,7 +2,7 @@
 
 A native Swift implementation of [Mozilla Readability](https://github.com/mozilla/readability), using [SwiftSoup](https://github.com/scinfu/SwiftSoup) for standards-aware HTML parsing and DOM operations and [WebURL](https://github.com/karwa/swift-url) for WHATWG URL resolution.
 
-`SwiftReadability` extracts the primary article from an HTML document without a browser, JavaScript runtime, Node process, or network service. Mozilla Readability at commit [`ab4027a`](https://github.com/mozilla/readability/commit/ab4027a) is the behavioral authority for this package. The earlier [lake-of-fire Swift port](https://github.com/lake-of-fire/swift-readability) is important provenance and supplied native Swift foundation; default compatibility is measured against the pinned Mozilla reference: when inherited behavior and Mozilla disagree, the Mozilla contract wins unless an explicitly isolated compatibility extension is being exercised.
+`SwiftReadability` extracts the primary article from an HTML document without a browser, JavaScript runtime, Node process, or network service. The earlier [lake-of-fire Swift port](https://github.com/lake-of-fire/swift-readability) established the native Swift foundation and remains credited implementation lineage. Default compatibility is measured against Mozilla Readability at commit [`ab4027a`](https://github.com/mozilla/readability/commit/ab4027a); deliberately different behavior is isolated behind explicit extensions.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ Add SwiftReadability with Swift Package Manager:
 ```swift
 .package(
     url: "https://github.com/wolfyy970/swift-readability.git",
-    from: "0.3.0"
+    from: "0.3.1"
 )
 ```
 
@@ -115,7 +115,7 @@ Mozilla's own JSDOM fixture runner deliberately removes source comments before c
 
 The same corpus also contains five explicitly profiled extension regressions for difficult Asahi article chrome, a Hypebeast carousel, a Web Japan feature, and BEPAL content. Their enhanced expected metadata, DOM, and content assertions use the test-only `publisherAdaptations` profile, which composes all granular extensions and is not public API or Mozilla output. The differential runner intentionally ignores enhancement profiles and parses all 136 sources with empty extensions on both sides; this preserves a clean Mozilla baseline while letting the native expected-output suite verify opt-in behavior separately.
 
-The repository was forked from lake-of-fire's Swift implementation and retains its BSD license, attribution, and history. That implementation was an ambitious and useful starting point, informed in turn by Mozilla Readability and Readability4J. The current engineering direction is a reliable Swift implementation governed directly by the pinned Mozilla behavior, built on that lineage while following the pinned Mozilla contract.
+The repository was forked from lake-of-fire's Swift implementation and retains its BSD license, attribution, and history. That implementation established a useful native foundation, informed in turn by Mozilla Readability and Readability4J. Current work builds on that lineage while using the pinned Mozilla behavior as the default compatibility contract.
 
 This is not represented as a clean-room implementation. It is a materially rewritten work in a documented lineage: the earlier Swift port supplied scaffolding, Mozilla supplies the pinned behavioral contract and the optional byte-identical oracle, and both Mozilla Readability and Readability4J remain credited where their Apache-licensed work informs the native implementation. See [Provenance and licensing](docs/provenance-and-licensing.md) for the component map and [Third-party notices](THIRD_PARTY_NOTICES.md) for attribution and redistribution terms.
 
@@ -197,9 +197,9 @@ swift run -c release SwiftReadabilityBench \
 
 Use `--fixtures PATH` and, if needed, `--manifest PATH` for another Mozilla-format corpus. Other flags are `--xml` and `--help`.
 
-The rebuilt harness rejects unknown or malformed arguments, missing or empty corpora, missing sources, parse failures, empty output, invalid UTF-16 lengths, nondeterministic repeated output, invalid timing samples, and zero-duration measurements. Each warmup and measured iteration constructs a fresh reader. Output includes per-fixture and aggregate p50, p95, and mean latency, article and input throughput, and a deterministic result checksum; `--timings` adds distributions for internal pipeline labels. A release-mode benchmark smoke is now a CI gate, and distribution failure modes have focused tests.
+The benchmark harness rejects unknown or malformed arguments, missing or empty corpora, missing sources, parse failures, empty output, invalid UTF-16 lengths, nondeterministic repeated output, invalid timing samples, and zero-duration measurements. Each warmup and measured iteration constructs a fresh reader. Output includes per-fixture and aggregate p50, p95, and mean latency, article and input throughput, and a deterministic result checksum; `--timings` adds distributions for internal pipeline labels. CI runs a release-mode benchmark smoke, and focused tests cover distribution failure modes.
 
-Benchmark results supplement correctness evidence; they do not replace parity, differential, or state-isolation tests. 
+Benchmark results supplement correctness evidence; they do not replace parity, differential, or state-isolation tests.
 
 ## Security
 

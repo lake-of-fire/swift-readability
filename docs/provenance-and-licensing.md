@@ -6,7 +6,7 @@ SwiftReadability is a native Swift implementation in an established Readability 
 
 Mozilla Readability commit [`ab4027a8b37669745016869a37a504727992b2ba`](https://github.com/mozilla/readability/commit/ab4027a8b37669745016869a37a504727992b2ba) is the behavioral authority. Default Swift behavior is judged against that exact revision through a byte-verified JavaScript oracle and a full result differential. This pin defines compatibility; it does not imply that Mozilla sponsors this package or that the package may discard Mozilla's Apache-2.0 terms.
 
-The Git history begins with the Lake of Fire SwiftReadability port. That implementation supplied meaningful Swift scaffolding and itself identifies Mozilla Readability and Readability4J as sources. Current work preserves that history and BSD-3-Clause notice while aligning inherited behavior against Mozilla's pinned behavior. Readability4J and Mozilla remain credited as Apache-2.0 lineage. No part of this history is described as clean-room work.
+The Git history begins with the Lake of Fire SwiftReadability port. That implementation established the native Swift foundation and itself identifies Mozilla Readability and Readability4J as sources. Current work preserves that history and BSD-3-Clause notice while aligning default behavior with the pinned Mozilla reference. Readability4J and Mozilla remain credited as Apache-2.0 lineage. No part of this history is described as clean-room work.
 
 ## Component map
 
