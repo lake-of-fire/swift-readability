@@ -1855,7 +1855,7 @@ final class ArticleGrabber: ProcessorBase {
         // Also protect descendants when leading-node cleanup walks inside those elements.
         let protectedTags = [
             "a", "h1", "h2", "h3", "h4", "h5", "h6", "img", "figure", "figcaption",
-            "picture", "iframe", "object", "embed"
+            "picture", "audio", "video", "iframe", "object", "embed"
         ]
         guard let protectedContent = try? node.select(protectedTags.joined(separator: ", ")),
               protectedContent.isEmpty else { return false }
