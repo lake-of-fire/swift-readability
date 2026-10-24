@@ -1810,9 +1810,6 @@ final class ArticleGrabber: ProcessorBase {
         let text = getInnerText(node, regEx: regEx)
         guard !text.isEmpty, text.count <= 100 else { return false }
         if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
-        if ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) > 0 {
-            return false
-        }
         let paragraphCount = (try? node.select("p").count) ?? 0
         guard paragraphCount <= 2 else { return false }
         return hasFollowingArticleBody(after: node)
@@ -1848,6 +1845,11 @@ final class ArticleGrabber: ProcessorBase {
     private func isKnownAuthorLabel(_ node: Element, authorLabels: [String]) -> Bool {
         let text = getInnerText(node, regEx: regEx)
         guard !text.isEmpty, text.count <= 100, !authorLabels.isEmpty else { return false }
+        // A matching caption or heading is article content, not standalone byline chrome.
+        // Apply this protection to the leading-node cleanup as well as nested bylines.
+        guard let protectedContent = try? node.select(
+            "a, h1, h2, h3, h4, h5, h6, img, figure, figcaption, picture, iframe, object, embed"
+        ), protectedContent.isEmpty else { return false }
         var remainder = text
         for label in authorLabels.sorted(by: { $0.count > $1.count }) {
             remainder = remainder.replacingOccurrences(of: label, with: "")
