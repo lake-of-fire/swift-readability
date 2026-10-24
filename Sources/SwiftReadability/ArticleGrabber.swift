@@ -1845,16 +1845,26 @@ final class ArticleGrabber: ProcessorBase {
     private func isKnownAuthorLabel(_ node: Element, authorLabels: [String]) -> Bool {
         let text = getInnerText(node, regEx: regEx)
         guard !text.isEmpty, text.count <= 100, !authorLabels.isEmpty else { return false }
-        // A matching caption or heading is article content, not standalone byline chrome.
-        // Apply this protection to the leading-node cleanup as well as nested bylines.
-        guard let protectedContent = try? node.select(
-            "a, h1, h2, h3, h4, h5, h6, img, figure, figcaption, picture, iframe, object, embed"
-        ), protectedContent.isEmpty else { return false }
         var remainder = text
         for label in authorLabels.sorted(by: { $0.count > $1.count }) {
             remainder = remainder.replacingOccurrences(of: label, with: "")
         }
-        return remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        // A matching caption or heading is article content, not standalone byline chrome.
+        // Also protect descendants when leading-node cleanup walks inside those elements.
+        let protectedTags = [
+            "a", "h1", "h2", "h3", "h4", "h5", "h6", "img", "figure", "figcaption",
+            "picture", "iframe", "object", "embed"
+        ]
+        guard let protectedContent = try? node.select(protectedTags.joined(separator: ", ")),
+              protectedContent.isEmpty else { return false }
+        var ancestor = node.parent()
+        while let parent = ancestor {
+            if protectedTags.contains(parent.tagNameSafe()) { return false }
+            ancestor = parent.parent()
+        }
+        return true
     }
 
     private func isCompactMediaActionChrome(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {
