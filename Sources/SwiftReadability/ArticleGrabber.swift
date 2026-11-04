@@ -1810,9 +1810,6 @@ final class ArticleGrabber: ProcessorBase {
         let text = getInnerText(node, regEx: regEx)
         guard !text.isEmpty, text.count <= 100 else { return false }
         if text.range(of: #"[。.!?！？]"#, options: .regularExpression) != nil { return false }
-        if ((try? node.select("a, h1, h2, h3, h4, h5, h6, img, figure, picture, iframe, object, embed").count) ?? 0) > 0 {
-            return false
-        }
         let paragraphCount = (try? node.select("p").count) ?? 0
         guard paragraphCount <= 2 else { return false }
         return hasFollowingArticleBody(after: node)
@@ -1852,7 +1849,22 @@ final class ArticleGrabber: ProcessorBase {
         for label in authorLabels.sorted(by: { $0.count > $1.count }) {
             remainder = remainder.replacingOccurrences(of: label, with: "")
         }
-        return remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        // A matching caption or heading is article content, not standalone byline chrome.
+        // Also protect descendants when leading-node cleanup walks inside those elements.
+        let protectedTags = [
+            "a", "h1", "h2", "h3", "h4", "h5", "h6", "img", "figure", "figcaption",
+            "picture", "svg", "audio", "video", "iframe", "object", "embed"
+        ]
+        guard let protectedContent = try? node.select(protectedTags.joined(separator: ", ")),
+              protectedContent.isEmpty else { return false }
+        var ancestor = node.parent()
+        while let parent = ancestor {
+            if protectedTags.contains(parent.tagNameSafe()) { return false }
+            ancestor = parent.parent()
+        }
+        return true
     }
 
     private func isCompactMediaActionChrome(_ node: Element, linkDensityCache: LinkDensityCache) -> Bool {

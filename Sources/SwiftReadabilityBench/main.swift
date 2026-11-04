@@ -103,6 +103,15 @@ func formatMillis(_ nanos: UInt64) -> String {
     return String(format: "%.2fms", ms)
 }
 
+@inline(__always)
+func withBenchmarkAutoreleasePool(_ body: () -> Void) {
+#if canImport(ObjectiveC)
+    autoreleasepool(invoking: body)
+#else
+    body()
+#endif
+}
+
 func main() {
     let options = parseArgs()
     let fixtures = loadFixtures(from: options.fixturesPath, filter: options.filter)
@@ -133,7 +142,7 @@ func main() {
         var elapsed: UInt64 = 0
         for _ in 0..<options.iterations {
             let start = DispatchTime.now().uptimeNanoseconds
-            autoreleasepool {
+            withBenchmarkAutoreleasePool {
                 if options.timings {
                     let (result, timing) = (try? reader.parseWithTimings()) ?? (nil, Readability.ReadabilityTimings(milliseconds: [:]))
                     _ = result
