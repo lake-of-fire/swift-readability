@@ -1724,11 +1724,7 @@ Readability.prototype = {
           if (parsed.author) {
             if (typeof parsed.author.name === "string") {
               metadata.byline = parsed.author.name.trim();
-            } else if (
-              Array.isArray(parsed.author) &&
-              parsed.author[0] &&
-              typeof parsed.author[0].name === "string"
-            ) {
+            } else if (Array.isArray(parsed.author)) {
               metadata.byline = parsed.author
                 .filter(function (author) {
                   return author && typeof author.name === "string";
