@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Script link cleanup</title></head>
+<body>
+<article>
+<h1>Script link cleanup</h1>
+<p>This article explains how reader mode retains useful article text after page scripts have been removed. Readers should still see every link label and every emphasized word, while script-only actions become ordinary text. The surrounding article has substantial prose so extraction succeeds independently of the cleanup assertions. This paragraph also supplies a stable introduction for both maintained implementations and keeps the inline examples in the selected article body.</p>
+<p>Compare the following actions in their original order:
+<a href="javascript:void(0)">Lowercase script link</a>,
+<a href="JAVASCRIPT:void(0)">Uppercase script link</a>,
+<a href="JaVaScRiPt:void(0)">Mixed case script link</a>,
+<a href="  javascript:void(0)  ">Space padded script link</a>,
+<a href="&#x01;JaVaScRiPt:void(0)&#x1F;">Control padded script link</a>,
+<a href="java&#x09;script:void(0)">Tab separated script link</a>,
+<a href="java&#x0A;script:void(0)">LF separated script link</a>,
+<a href="java&#x0D;script:void(0)">CR separated script link</a>,
+<a href=" &#x09;JaVa&#x0A;ScRiPt:void(0) "><strong>Rich script link</strong> tail</a>.
+These labels describe unavailable page actions and should remain readable without retaining their unusable anchors.</p>
+<p>Ordinary links remain useful:
+<a href="https://example.com/read?edition=2#part">HTTPS control</a>,
+<a href="../chapter.html?edition=2#part">Relative control</a>,
+<a href="#part">Fragment control</a>,
+<a href="java script:action">Space inside scheme control</a>,
+<a href="java%73cript:action">Encoded scheme control</a>,
+<a href="javascriptx:action">Longer scheme control</a>,
+<a href="&#xA0;JaVaScRiPt:action">NBSP prefix control</a>,
+<a href="&#x2003;JAVASCRIPT:action">EM SPACE prefix control</a>,
+<a href="&#xA0;">Unicode whitespace path control</a>.
+The reader keeps these original navigation choices under the existing URI resolution policy. This closing paragraph provides additional substantive text and confirms that the cleanup changes only unavailable script actions, preserving ordinary article content and formatting throughout the document.</p>
+</article>
+</body>
+</html>
