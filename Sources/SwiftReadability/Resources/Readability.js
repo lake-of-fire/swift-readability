@@ -1639,6 +1639,12 @@ Readability.prototype = {
    */
   _getJSONLD(doc) {
     var scripts = this._getAllNodesWithTag(doc, ["script"]);
+    var matchesType = value => {
+      var types = Array.isArray(value) ? value : [value]
+      return types.some(type =>
+        typeof type === "string" && type.match(this.REGEXPS.jsonLdArticleTypes)
+      )
+    }
 
     var metadata;
 
@@ -1657,10 +1663,7 @@ Readability.prototype = {
 
           if (Array.isArray(parsed)) {
             parsed = parsed.find(it => {
-              return (
-                it["@type"] &&
-                it["@type"].match(this.REGEXPS.jsonLdArticleTypes)
-              );
+              return it && typeof it === "object" && matchesType(it["@type"])
             });
             if (!parsed) {
               return;
@@ -1681,14 +1684,13 @@ Readability.prototype = {
 
           if (!parsed["@type"] && Array.isArray(parsed["@graph"])) {
             parsed = parsed["@graph"].find(it => {
-              return (it["@type"] || "").match(this.REGEXPS.jsonLdArticleTypes);
+              return it && typeof it === "object" && matchesType(it["@type"])
             });
           }
 
           if (
             !parsed ||
-            !parsed["@type"] ||
-            !parsed["@type"].match(this.REGEXPS.jsonLdArticleTypes)
+            !matchesType(parsed["@type"])
           ) {
             return;
           }
