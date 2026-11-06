@@ -214,7 +214,12 @@ final class Postprocessor: ProcessorBase {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if href.isEmpty { continue }
 
-                if href.hasPrefix("javascript:") {
+                let schemePrefix = href.utf8
+                    .filter { $0 != 0x09 && $0 != 0x0A && $0 != 0x0D }
+                    .drop(while: { $0 <= 0x20 })
+                    .prefix(11)
+                    .map { byte in (0x41...0x5A).contains(byte) ? byte + 0x20 : byte }
+                if schemePrefix.elementsEqual("javascript:".utf8) {
                     replaceJavascriptLink(link)
                 } else {
                     let resolved = toAbsoluteURI(href)
