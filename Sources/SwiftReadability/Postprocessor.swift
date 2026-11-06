@@ -210,8 +210,10 @@ final class Postprocessor: ProcessorBase {
         // Avoid SwiftSoup tag-query caching; we mutate the DOM in this phase.
         if let links = try? element.select("a") {
             for link in links {
+                // URL parsing trims C0 controls and ASCII space, not Unicode whitespace.
+                // Keep prefixes such as NBSP: they make a relative path, not a script scheme.
                 let href = String(decoding: link.attrOrEmptyUTF8(ReadabilityUTF8Arrays.href), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\u{0000}"..."\u{0020}"))
                 if href.isEmpty { continue }
 
                 let schemePrefix = href.utf8
