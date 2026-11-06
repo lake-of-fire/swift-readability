@@ -214,8 +214,7 @@ final class MetadataParser: ProcessorBase {
             var candidate: [String: Any]
             if let array = parsed as? [Any] {
                 guard let found = array.compactMap({ $0 as? [String: Any] }).first(where: { dict in
-                    let type = dict["@type"] as? String
-                    return type.map(matchesType) ?? false
+                    matchesType(dict["@type"])
                 }) else {
                     continue
                 }
@@ -243,14 +242,13 @@ final class MetadataParser: ProcessorBase {
             // If no @type but has @graph, search graph for a supported @type.
             if candidate["@type"] == nil, let graph = candidate["@graph"] as? [Any] {
                 if let graphObj = graph.compactMap({ $0 as? [String: Any] }).first(where: { dict in
-                    let type = dict["@type"] as? String
-                    return type.map(matchesType) ?? false
+                    matchesType(dict["@type"])
                 }) {
                     candidate = graphObj
                 }
             }
 
-            guard let typeValue = candidate["@type"] as? String, matchesType(typeValue) else { continue }
+            guard matchesType(candidate["@type"]) else { continue }
 
             var meta = JSONLDMetadata()
 
@@ -310,12 +308,22 @@ final class MetadataParser: ProcessorBase {
         return JSONLDMetadata()
     }
 
-    private func matchesType(_ typeValue: String) -> Bool {
-        return MetadataParser.jsonLdArticleTypesRegex.firstMatch(
-            in: typeValue,
-            options: [],
-            range: NSRange(location: 0, length: typeValue.utf16.count)
-        ) != nil
+    private func matchesType(_ value: Any?) -> Bool {
+        let types: [String]
+        if let type = value as? String {
+            types = [type]
+        } else if let values = value as? [Any] {
+            types = values.compactMap { $0 as? String }
+        } else {
+            return false
+        }
+        return types.contains { type in
+            MetadataParser.jsonLdArticleTypesRegex.firstMatch(
+                in: type,
+                options: [],
+                range: NSRange(location: 0, length: type.utf16.count)
+            ) != nil
+        }
     }
 
     // MARK: - Helpers
