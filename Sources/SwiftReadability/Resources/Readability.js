@@ -479,7 +479,8 @@ Readability.prototype = {
       if (href) {
         // Remove links with javascript: URIs, since
         // they won't work after scripts have been removed from the page.
-        if (href.indexOf("javascript:") === 0) {
+        var schemeHref = href.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+/, "")
+        if (/^javascript:/i.test(schemeHref)) {
           // if the link only contains simple text content, it can be converted to a text node
           if (
             link.childNodes.length === 1 &&
