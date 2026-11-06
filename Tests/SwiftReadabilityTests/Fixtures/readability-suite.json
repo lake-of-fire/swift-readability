@@ -2,7 +2,19 @@
   "baseURL": "http://fakehost/test/page.html",
   "defaultFixtureSelection": {
     "javascript": [
-      "nihongoschool-glasgow"
+      "nihongoschool-glasgow",
+      "jsonld-type-scalar",
+      "jsonld-type-array",
+      "jsonld-type-document-array",
+      "jsonld-type-graph",
+      "jsonld-type-document-later-peer",
+      "jsonld-type-graph-later-peer",
+      "jsonld-type-unsupported",
+      "jsonld-author-reference-first",
+      "jsonld-author-reference-last",
+      "jsonld-author-object",
+      "jsonld-author-references-only",
+      "script-link-scheme-normalization"
     ]
   },
   "assertions": {
@@ -82,6 +94,39 @@
       "contentIncludes": [
         "忘れられない夏の記憶",
         "山道を越えて海に出た日"
+      ]
+    },
+    "script-link-scheme-normalization": {
+      "contentExcludes": [
+        "href=\"javascript:",
+        "Lowercase script link</a>",
+        "Uppercase script link</a>",
+        "Mixed case script link</a>",
+        "Space padded script link</a>",
+        "Control padded script link</a>",
+        "Tab separated script link</a>",
+        "LF separated script link</a>",
+        "CR separated script link</a>"
+      ],
+      "contentIncludes": [
+        "Lowercase script link",
+        "Uppercase script link",
+        "Mixed case script link",
+        "Space padded script link",
+        "Control padded script link",
+        "Tab separated script link",
+        "LF separated script link",
+        "CR separated script link",
+        "<span><strong>Rich script link</strong> tail</span>",
+        "href=\"https://example.com/read?edition=2#part\"",
+        "href=\"http://fakehost/chapter.html?edition=2#part\"",
+        "href=\"#part\"",
+        "href=\"http://fakehost/test/java%20script:action\"",
+        "href=\"http://fakehost/test/java%73cript:action\"",
+        "href=\"javascriptx:action\"",
+        "href=\"http://fakehost/test/%C2%A0JaVaScRiPt:action\">NBSP prefix control</a>",
+        "href=\"http://fakehost/test/%E2%80%83JAVASCRIPT:action\">EM SPACE prefix control</a>",
+        "href=\"http://fakehost/test/%C2%A0\">Unicode whitespace path control</a>"
       ]
     }
   },

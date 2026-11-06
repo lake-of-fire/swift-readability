@@ -479,7 +479,8 @@ Readability.prototype = {
       if (href) {
         // Remove links with javascript: URIs, since
         // they won't work after scripts have been removed from the page.
-        if (href.indexOf("javascript:") === 0) {
+        var schemeHref = href.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+/, "")
+        if (/^javascript:/i.test(schemeHref)) {
           // if the link only contains simple text content, it can be converted to a text node
           if (
             link.childNodes.length === 1 &&
@@ -1639,6 +1640,12 @@ Readability.prototype = {
    */
   _getJSONLD(doc) {
     var scripts = this._getAllNodesWithTag(doc, ["script"]);
+    var matchesType = value => {
+      var types = Array.isArray(value) ? value : [value]
+      return types.some(type =>
+        typeof type === "string" && type.match(this.REGEXPS.jsonLdArticleTypes)
+      )
+    }
 
     var metadata;
 
@@ -1657,10 +1664,7 @@ Readability.prototype = {
 
           if (Array.isArray(parsed)) {
             parsed = parsed.find(it => {
-              return (
-                it["@type"] &&
-                it["@type"].match(this.REGEXPS.jsonLdArticleTypes)
-              );
+              return it && typeof it === "object" && matchesType(it["@type"])
             });
             if (!parsed) {
               return;
@@ -1681,14 +1685,13 @@ Readability.prototype = {
 
           if (!parsed["@type"] && Array.isArray(parsed["@graph"])) {
             parsed = parsed["@graph"].find(it => {
-              return (it["@type"] || "").match(this.REGEXPS.jsonLdArticleTypes);
+              return it && typeof it === "object" && matchesType(it["@type"])
             });
           }
 
           if (
             !parsed ||
-            !parsed["@type"] ||
-            !parsed["@type"].match(this.REGEXPS.jsonLdArticleTypes)
+            !matchesType(parsed["@type"])
           ) {
             return;
           }
@@ -1722,11 +1725,7 @@ Readability.prototype = {
           if (parsed.author) {
             if (typeof parsed.author.name === "string") {
               metadata.byline = parsed.author.name.trim();
-            } else if (
-              Array.isArray(parsed.author) &&
-              parsed.author[0] &&
-              typeof parsed.author[0].name === "string"
-            ) {
+            } else if (Array.isArray(parsed.author)) {
               metadata.byline = parsed.author
                 .filter(function (author) {
                   return author && typeof author.name === "string";

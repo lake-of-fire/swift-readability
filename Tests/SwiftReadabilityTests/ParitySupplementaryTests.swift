@@ -9,6 +9,26 @@ import Testing
 struct ParitySupplementaryTests {
     private let baseURL = URL(string: "http://example.com")!
 
+    @Test(arguments: ["custom:flag ", "😀 ", "e\u{301} ", "🧑‍💻 "])
+    func metadataPropertiesUseUTF16MatchRanges(prefix: String) throws {
+        let html = """
+        <html><head><title>Fallback</title>
+        <meta property="\(prefix)og:title twitter:title" content="Selected title">
+        <meta property="\(prefix)dc:creator article:author" content="Selected author">
+        <meta property="\(prefix)og:description twitter:description" content="Selected description">
+        <meta property="\(prefix)og:site_name" content="Selected site">
+        <meta property="\(prefix)article:published_time" content="2026-11-06T12:00:00Z">
+        </head><body><p>Article body.</p></body></html>
+        """
+        let document = try SwiftSoup.parse(html, baseURL.absoluteString)
+        let metadata = MetadataParser().getArticleMetadata(document, disableJSONLD: true)
+        #expect(metadata.title == "Selected title")
+        #expect(metadata.byline == "Selected author")
+        #expect(metadata.excerpt == "Selected description")
+        #expect(metadata.siteName == "Selected site")
+        #expect(metadata.publishedTime == "2026-11-06T12:00:00Z")
+    }
+
     @Test func documentPipelineMutatesOriginalDOM() throws {
         let html = "<html><head><script>console.log('x')</script></head><body><p>Hello world</p></body></html>"
         let doc = try SwiftSoup.parse(html, baseURL.absoluteString)
