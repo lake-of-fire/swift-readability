@@ -123,7 +123,10 @@
         "href=\"#part\"",
         "href=\"http://fakehost/test/java%20script:action\"",
         "href=\"http://fakehost/test/java%73cript:action\"",
-        "href=\"javascriptx:action\""
+        "href=\"javascriptx:action\"",
+        "href=\"http://fakehost/test/%C2%A0JaVaScRiPt:action\">NBSP prefix control</a>",
+        "href=\"http://fakehost/test/%E2%80%83JAVASCRIPT:action\">EM SPACE prefix control</a>",
+        "href=\"http://fakehost/test/%C2%A0\">Unicode whitespace path control</a>"
       ]
     }
   },
