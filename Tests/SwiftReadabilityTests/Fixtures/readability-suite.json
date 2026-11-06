@@ -2,7 +2,18 @@
   "baseURL": "http://fakehost/test/page.html",
   "defaultFixtureSelection": {
     "javascript": [
-      "nihongoschool-glasgow"
+      "nihongoschool-glasgow",
+      "jsonld-type-scalar",
+      "jsonld-type-array",
+      "jsonld-type-document-array",
+      "jsonld-type-graph",
+      "jsonld-type-document-later-peer",
+      "jsonld-type-graph-later-peer",
+      "jsonld-type-unsupported",
+      "jsonld-author-reference-first",
+      "jsonld-author-reference-last",
+      "jsonld-author-object",
+      "jsonld-author-references-only"
     ]
   },
   "assertions": {
