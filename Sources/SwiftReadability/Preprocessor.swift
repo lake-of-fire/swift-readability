@@ -188,13 +188,51 @@ final class Preprocessor: ProcessorBase {
     }
 
     private func firstImageFromSrcset(_ srcset: String) -> String? {
-        for candidate in srcset.split(separator: ",") {
-            guard let url = candidate.split(whereSeparator: { $0.isWhitespace }).first else {
-                continue
+        // Srcset URLs end at ASCII whitespace, not at embedded commas (for
+        // example CDN transforms or signed query values). Only trailing URL
+        // commas and commas outside descriptor parentheses separate candidates.
+        let input = Array(srcset.utf8)
+        var position = 0
+
+        func isWhitespace(_ byte: UInt8) -> Bool {
+            byte == 9 || byte == 10 || byte == 12 || byte == 13 || byte == 32
+        }
+
+        while position < input.count {
+            while position < input.count,
+                  isWhitespace(input[position]) || input[position] == 44 {
+                position += 1
             }
-            let value = String(url).trimmingCharacters(in: .whitespacesAndNewlines)
-            if looksLikeRasterImageURL(value) {
-                return value
+            guard position < input.count else { break }
+
+            let start = position
+            while position < input.count, !isWhitespace(input[position]) {
+                position += 1
+            }
+            var end = position
+            while end > start, input[end - 1] == 44 {
+                end -= 1
+            }
+
+            let url = String(decoding: input[start..<end], as: UTF8.self)
+            if looksLikeRasterImageURL(url) {
+                return url
+            }
+            // A trailing comma already ended this descriptorless candidate.
+            if end != position { continue }
+
+            // Preserve the existing first-raster policy; skip descriptors rather
+            // than interpreting their density or mistaking their text for URLs.
+            var inParentheses = false
+            while position < input.count {
+                let byte = input[position]
+                position += 1
+                if byte == 41 {
+                    inParentheses = false
+                } else if !inParentheses {
+                    if byte == 44 { break }
+                    if byte == 40 { inParentheses = true }
+                }
             }
         }
         return nil

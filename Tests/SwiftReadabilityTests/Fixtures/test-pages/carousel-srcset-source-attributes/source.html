@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Gallery sources from lazy images and pictures</title></head>
+<body><article>
+<h1>Gallery sources from lazy images and pictures</h1>
+<p>The exhibition follows a river through the city, with photographs showing the same places in different seasons. Visitors can compare the changing light, the bridges, and the paths beside the water. Each photograph includes a caption describing its location. The article explains how the photographers returned throughout the year and chose views that make those changes easy to see.</p>
+<div class="swiper">
+<figure><img data-srcset="https://cdn.example.com/resize/w_480,h_320/lazy.jpg 480w, /unused-lazy.jpg 960w" alt="Lazy"><figcaption>Lazy source</figcaption></figure>
+<figure><img data-flickity-lazyload-srcset="https://cdn.example.com/resize/w_480,h_320/flickity.webp 1x, /unused-flickity.webp 2x" alt="Flickity"><figcaption>Flickity source</figcaption></figure>
+<figure><picture><source srcset="https://cdn.example.com/resize/w_480,h_320/picture.png 480w, /unused-picture.png 960w"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Picture"></picture><figcaption>Picture source</figcaption></figure>
+</div>
+<p>The gallery belongs with this account of the exhibition. Its images and captions provide the examples discussed in the text, and their original addresses must survive extraction.</p>
+</article></body>
+</html>

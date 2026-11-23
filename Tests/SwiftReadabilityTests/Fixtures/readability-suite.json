@@ -14,7 +14,10 @@
       "jsonld-author-reference-last",
       "jsonld-author-object",
       "jsonld-author-references-only",
-      "script-link-scheme-normalization"
+      "script-link-scheme-normalization",
+      "carousel-srcset-url-commas",
+      "carousel-srcset-candidate-boundaries",
+      "carousel-srcset-source-attributes"
     ]
   },
   "assertions": {
@@ -127,6 +130,50 @@
         "href=\"http://fakehost/test/%C2%A0JaVaScRiPt:action\">NBSP prefix control</a>",
         "href=\"http://fakehost/test/%E2%80%83JAVASCRIPT:action\">EM SPACE prefix control</a>",
         "href=\"http://fakehost/test/%C2%A0\">Unicode whitespace path control</a>"
+      ]
+    },
+    "carousel-srcset-url-commas": {
+      "contentIncludes": [
+        "data-readability-carousel=\"true\"",
+        "src=\"https://cdn.example.com/upload/w_400,h_300/river.jpg\"",
+        "src=\"http://fakehost/images/bridge.jpg?crop=0,0,640,360&amp;signature=first,second\"",
+        "src=\"http://fakehost/images/w_400,h_300/garden.webp\"",
+        "River in spring",
+        "Bridge in summer",
+        "Garden in autumn"
+      ],
+      "contentExcludes": [
+        "src=\"http://fakehost/test/h_300/",
+        "src=\"http://fakehost/wrong.jpg\""
+      ]
+    },
+    "carousel-srcset-candidate-boundaries": {
+      "contentIncludes": [
+        "data-readability-carousel=\"true\"",
+        "src=\"http://fakehost/images/one.jpg\"",
+        "src=\"http://fakehost/images/two.webp\"",
+        "src=\"http://fakehost/images/three.png\"",
+        "src=\"http://fakehost/images/four.gif\"",
+        "src=\"http://fakehost/images/%E7%94%BA,%E6%A9%8B.jpg\""
+      ],
+      "contentExcludes": [
+        "src=\"http://fakehost/test/h_300/",
+        "src=\"http://fakehost/wrong.jpg\""
+      ]
+    },
+    "carousel-srcset-source-attributes": {
+      "contentIncludes": [
+        "data-readability-carousel=\"true\"",
+        "src=\"https://cdn.example.com/resize/w_480,h_320/lazy.jpg\"",
+        "src=\"https://cdn.example.com/resize/w_480,h_320/flickity.webp\"",
+        "src=\"https://cdn.example.com/resize/w_480,h_320/picture.png\"",
+        "Lazy source",
+        "Flickity source",
+        "Picture source"
+      ],
+      "contentExcludes": [
+        "src=\"http://fakehost/test/h_300/",
+        "src=\"http://fakehost/wrong.jpg\""
       ]
     }
   },
