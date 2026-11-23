@@ -2560,16 +2560,62 @@ Readability.prototype = {
 
   _firstImageFromSrcset(srcset) {
     if (!srcset) {
-      return "";
+      return ""
     }
-    var candidates = String(srcset).split(",");
-    for (var i = 0; i < candidates.length; i++) {
-      var url = candidates[i].trim().split(/\s+/)[0];
+    // Srcset URLs end at ASCII whitespace, not at embedded commas (for
+    // example CDN transforms or signed query values). Only trailing URL
+    // commas and commas outside descriptor parentheses separate candidates.
+    const input = String(srcset)
+    const whitespace = /[\t\n\f\r ]/
+    let position = 0
+
+    while (position < input.length) {
+      while (
+        position < input.length &&
+        (whitespace.test(input[position]) || input[position] === ",")
+      ) {
+        position++
+      }
+      if (position === input.length) {
+        break
+      }
+
+      const start = position
+      while (position < input.length && !whitespace.test(input[position])) {
+        position++
+      }
+      let end = position
+      while (end > start && input[end - 1] === ",") {
+        end--
+      }
+
+      const url = input.slice(start, end)
       if (this._looksLikeRasterImageURL(url)) {
-        return url;
+        return url
+      }
+      // A trailing comma already ended this descriptorless candidate.
+      if (end !== position) {
+        continue
+      }
+
+      // Preserve the existing first-raster policy; skip descriptors rather
+      // than interpreting their density or mistaking their text for URLs.
+      let inParentheses = false
+      while (position < input.length) {
+        const character = input[position++]
+        if (character === ")") {
+          inParentheses = false
+        } else if (!inParentheses) {
+          if (character === ",") {
+            break
+          }
+          if (character === "(") {
+            inParentheses = true
+          }
+        }
       }
     }
-    return "";
+    return ""
   },
 
   _buildReadabilityCarousel(sourceNode) {
